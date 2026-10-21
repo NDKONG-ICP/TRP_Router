@@ -56,7 +56,19 @@ const health = await llama.health();
 console.log("health", health);
 
 let offset = 0;
-let i = 0;
+const prior = await llama.uploaded_file_details({ filename: CANISTER_FILE });
+const priorOk = prior?.Ok ?? prior?.ok;
+if (priorOk?.filesize != null) {
+  const fs = Number(priorOk.filesize);
+  if (fs > 0 && fs < bytes.length) {
+    offset = fs;
+    console.log("resuming upload at offset", offset, `(${((offset / bytes.length) * 100).toFixed(1)}%)`);
+  } else if (fs >= bytes.length) {
+    console.log("file already complete on canister", fs);
+    offset = bytes.length;
+  }
+}
+let i = Math.floor(offset / CHUNK);
 while (offset < bytes.length) {
   const chunk = bytes.subarray(offset, offset + CHUNK);
   const res = await llama.file_upload_chunk({

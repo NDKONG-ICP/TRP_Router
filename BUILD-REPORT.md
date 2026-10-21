@@ -1,7 +1,7 @@
 # TRP Router — BUILD REPORT
 
 **Branch:** `trp-router/build`  
-**Updated:** 2026-10-21 (post top-up + transform + P5 partial)  
+**Updated:** 2026-10-21 — **mainnet beta complete**  
 **Identity:** `ic_deploy_plain` · **Cycles wallet:** `daf6l-jyaaa-aaaao-a4nba-cai`
 
 ## Mainnet canister IDs
@@ -9,9 +9,9 @@
 | Canister | ID | Status |
 |----------|-----|--------|
 | **blob_store** | `5y35h-dyaaa-aaaao-bbqua-cai` | Live |
-| **router_canister** | `5723t-oaaaa-aaaao-bbquq-cai` | Live — image + status |
-| **http_transform** | `5wzqp-yiaaa-aaaao-bbqva-cai` | Deployed (unused; transform lives on router) |
-| **llama_cpp_qwen25** | `5ryw3-vqaaa-aaaao-bbqvq-cai` | Wasm installed; **GGUF upload ~6% then cycles** |
+| **router_canister** | `5723t-oaaaa-aaaao-bbquq-cai` | Live |
+| **llama_cpp_qwen25** | `5ryw3-vqaaa-aaaao-bbqvq-cai` | **Live (BETA)** — Qwen2.5-0.5B q8_0 loaded |
+| **http_transform** | `5wzqp-yiaaa-aaaao-bbqva-cai` | Unused (transform on router) |
 
 ## Live URLs
 
@@ -19,30 +19,28 @@
 |---------|-----|
 | **UI (DRAFT)** | https://cnl2f-gqaaa-aaaao-a4ngq-cai.icp0.io/router |
 | **API** | https://5723t-oaaaa-aaaao-bbquq-cai.raw.icp0.io/v1 |
-| **Status** | https://5723t-oaaaa-aaaao-bbquq-cai.raw.icp0.io/v1/status |
-| **Image gen** | `POST …/v1/images/generations` via agent/`http_request_update` — **PASS** (Pollinations + on-chain `/blob/…`) |
+| **On-chain chat (BETA)** | `POST …/v1/chat/completions` + `X-TRP-On-Chain: true` · model `trp/onchain-qwen-0.5b` |
+| **Image gen** | `POST …/v1/images/generations` → on-chain `/blob/<sha256>` |
 
-## Fixes shipped (this session)
+## Mainnet smoke (verified)
 
-1. **HTTP outcall consensus:** in-canister `transform` query (strip headers) + **deterministic Pollinations seed** from prompt hash.
-2. **Mainnet image smoke:** `node scripts/test-mainnet-image.mjs` → **200** + `/blob/<sha256>`.
-3. **P5 started:** `llama_cpp_qwen25` on IC with `wasm_memory_limit` 3.75 GiB; upload interrupted — llama needs **≥0.4 TC** in-canister + wallet top-up to finish.
+| Test | Result |
+|------|--------|
+| `node scripts/test-mainnet-image.mjs` | **PASS** (Pollinations + blob) |
+| `node scripts/test-mainnet-chat.mjs` | **PASS** — e.g. `"Hello, how can I help you today?"` |
+| `GET /v1/status` | `onchain_models_ready=true`, `payments_enabled=false` |
 
-## Owner actions (finish P5)
+**GGUF:** sha256 `ca59ca7f…` · 675_710_816 bytes · onicai wasm **v0.22.0** (see `VERSIONS.md`).
 
-1. **Top up** `daf6l-jyaaa-aaaao-a4nba-cai` by **≥0.5 TC** (wallet was empty again after llama create/upload).
-2. ```bash
-   cd trp-router && dfx identity use ic_deploy_plain
-   dfx canister deposit-cycles 500_000_000_000 5ryw3-vqaaa-aaaao-bbqvq-cai --network ic
-   DFX_NETWORK=ic node scripts/upload-gguf.mjs
-   bash scripts/setup-llama-mainnet.sh
-   node scripts/test-mainnet-chat.mjs
-   ```
-3. **Provider keys (optional):** copy `CLOUDFLARE_*` / `GEMINI_API_KEY` into `trp-router/.env` (gitignored), run `node scripts/wire-mainnet-router.mjs`.
-4. **Legal:** DRAFT copy on `/router` before public launch.
+## Staged / owner optional
 
-## Local (unchanged)
+- **TRP payments:** `PAYMENTS_ENABLED=false` — UI shows “coming at token launch.”
+- **Provider keys:** no `trp-router/.env` on deploy host — add Cloudflare/Gemini + `node scripts/wire-mainnet-router.mjs`.
+- **Legal:** DRAFT banners on `/router` before broad public push.
+- **Cycles:** top up `5ryw3-…` (llama) if inference/upload traps; wallet balance varies after upload.
 
-P1/P2 pass; M3 on Pocket IC.
+## Local
 
-See `VERSIONS.md`, `MAINNET-SIZING.md`.
+P1/P2/M1–M6 mock tests on Pocket IC unchanged.
+
+See `MAINNET-SIZING.md`.
