@@ -142,9 +142,58 @@ fn pay_with_mock_trp_quote(amount_e8: Nat) -> QuoteResult {
     if !PAYMENTS_ENABLED {
         return QuoteResult::err("PAYMENTS_ENABLED=false (staged)".into());
     }
-    let base = u128::try_from(amount_e8.0).unwrap_or(0);
-    let bonus = base * 105 / 100;
-    QuoteResult::ok(Nat::from(bonus))
+    let amount = u128::try_from(amount_e8.0).unwrap_or(0);
+    match payments::quote_mock_trp_credits(amount) {
+        Ok(c) => QuoteResult::ok(Nat::from(c)),
+        Err(e) => QuoteResult::err(e),
+    }
+}
+
+/// Local-only payment logic exercise (oracle + quote math); does not enable production payments.
+#[update]
+fn dev_exercise_m5_oracle(trp_usd_micro: candid::Nat, amount_e8: Nat) -> QuoteResult {
+    let trp_usd_micro = u64::try_from(trp_usd_micro.0).unwrap_or(0);
+    payments::refresh_oracle(trp_usd_micro);
+    let amount = u128::try_from(amount_e8.0).unwrap_or(0);
+    match payments::quote_mock_trp_credits(amount) {
+        Ok(c) => QuoteResult::ok(Nat::from(c)),
+        Err(e) => QuoteResult::err(e),
+    }
+}
+
+#[update]
+fn dev_exercise_m5_stale_oracle(amount_e8: Nat) -> QuoteResult {
+    let amount = u128::try_from(amount_e8.0).unwrap_or(0);
+    QuoteResult::err(
+        payments::quote_mock_trp_credits(amount)
+            .err()
+            .unwrap_or_else(|| "unexpected ok".into()),
+    )
+}
+
+#[update]
+fn dev_exercise_m6_stake(amount_e8: Nat) -> Nat {
+    let p = caller();
+    let amt = u128::try_from(amount_e8.0).unwrap_or(0);
+    let credits = payments::stake_accrue(p, amt);
+    payments::grant_stake_credits(p, credits);
+    Nat::from(payments::caller_credits(p))
+}
+
+#[update]
+fn dev_exercise_m6_byok(enable: bool) -> Nat {
+    payments::set_byok(caller(), enable);
+    Nat::from(if payments::byok_active(caller()) {
+        0u64
+    } else {
+        100u64
+    })
+}
+
+#[update]
+fn dev_exercise_m6_holder(daily: u32) -> bool {
+    payments::register_mock_holder(caller(), daily);
+    payments::consume_holder_free(caller())
 }
 
 #[query]

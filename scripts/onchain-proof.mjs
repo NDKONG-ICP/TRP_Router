@@ -1,12 +1,11 @@
 #!/usr/bin/env node
-/** Direct on-chain inference proof (llama_cpp_qwen25). */
+/** On-chain chat proof via router (same path as M3 / mainnet SSE). */
 import { writeFileSync, mkdirSync } from "fs";
 import { execSync } from "child_process";
 import { join, dirname } from "path";
 import { fileURLToPath } from "url";
 import { HttpAgent, Actor } from "@dfinity/agent";
-import { Secp256k1KeyIdentity } from "@dfinity/identity-secp256k1";
-import { idlFactory } from "../src/declarations/llama_cpp_qwen25/llama_cpp_qwen25.did.js";
+import { IDL } from "@dfinity/candid";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const root = join(__dirname, "..");
@@ -16,83 +15,81 @@ mkdirSync(tmp, { recursive: true });
 const dfx = (cmd) =>
   execSync(`dfx ${cmd}`, { cwd: root, encoding: "utf8", env: { ...process.env, NO_COLOR: "1" } }).trim();
 
-const whoami = dfx("identity whoami");
-const pem = execSync(`dfx identity export ${whoami}`, { cwd: root, encoding: "utf8" });
-const identity = Secp256k1KeyIdentity.fromPem(pem);
-const canisterId = dfx("canister id llama_cpp_qwen25");
-const agent = new HttpAgent({
-  host: process.env.DFX_HOST || "http://127.0.0.1:8000",
-  identity,
+const blobId = dfx("canister id blob_store");
+const llamaId = dfx("canister id llama_cpp_qwen25");
+const routerId = dfx("canister id router_canister");
+
+dfx(`canister call router_canister init_router "(principal \\"${blobId}\\")"`);
+dfx(`canister call router_canister set_llama_qwen25 "(principal \\"${llamaId}\\")"`);
+
+const HeaderField = IDL.Tuple(IDL.Text, IDL.Text);
+const HttpRequest = IDL.Record({
+  method: IDL.Text,
+  url: IDL.Text,
+  headers: IDL.Vec(HeaderField),
+  body: IDL.Vec(IDL.Nat8),
 });
+const HttpResponse = IDL.Record({
+  status_code: IDL.Nat16,
+  headers: IDL.Vec(HeaderField),
+  body: IDL.Vec(IDL.Nat8),
+  streaming_strategy: IDL.Opt(IDL.Null),
+});
+
+const idlFactory = ({ IDL: I }) =>
+  I.Service({
+    http_request_update: I.Func([HttpRequest], [HttpResponse], []),
+  });
+
+const agent = new HttpAgent({ host: process.env.DFX_HOST || "http://127.0.0.1:8000" });
 await agent.fetchRootKey();
-const llama = Actor.createActor(idlFactory, { agent, canisterId });
+const router = Actor.createActor(idlFactory, { agent, canisterId: routerId });
 
-const prompt =
-  "<|im_start|>system\nYou are a helpful assistant.\n" +
-  "<|im_start|>user\nSay hello in 5 words.\n" +
-  "<|im_start|>assistant\n";
+const body = JSON.stringify({
+  model: "trp/onchain-qwen-0.5b",
+  messages: [{ role: "user", content: "Say hello in 5 words" }],
+});
 
-const baseArgs = [
-  "--prompt-cache",
-  "prompt.cache",
-  "--prompt-cache-all",
-  "--cache-type-k",
-  "q8_0",
-  "--repeat-penalty",
-  "1.1",
-  "--temp",
-  "0.6",
-  "-sp",
-];
+const res = await router.http_request_update({
+  method: "POST",
+  url: "/v1/chat/completions",
+  headers: [],
+  body: Array.from(Buffer.from(body)),
+});
 
-function unwrap(res) {
-  if (res?.Ok) return res.Ok;
-  if (res?.Err) throw new Error(JSON.stringify(res.Err));
-  throw new Error(JSON.stringify(res));
+const sse = Buffer.from(res.body).toString();
+if (Number(res.status_code) !== 200) {
+  throw new Error(`chat failed ${res.status_code}: ${sse.slice(0, 300)}`);
 }
 
-let calls = 0;
-let output = "";
-
-// Ingest prompt in slices until prompt_remaining empty
-let ingestPrompt = prompt;
-while (ingestPrompt.length > 0) {
-  calls += 1;
-  const r = unwrap(
-    await llama.run_update({
-      args: [...baseArgs, "-p", ingestPrompt, "-n", "1"],
-    }),
-  );
-  ingestPrompt = r.prompt_remaining || "";
-  if (r.output) output += r.output;
-  if (calls > 50) throw new Error("ingest loop limit");
+let completion = "";
+let updateCalls = 0;
+for (const line of sse.split("\n")) {
+  if (!line.startsWith("data: ")) continue;
+  const payload = line.slice(6).trim();
+  if (payload === "[DONE]") continue;
+  try {
+    const j = JSON.parse(payload);
+    if (j.on_chain_update_calls) updateCalls = Number(j.on_chain_update_calls);
+    const delta = j.choices?.[0]?.delta?.content;
+    if (delta) completion += delta;
+  } catch {
+    /* ignore */
+  }
 }
 
-// Generate tokens until EOG
-while (true) {
-  calls += 1;
-  const r = unwrap(
-    await llama.run_update({
-      args: [...baseArgs, "-p", "", "-n", "512"],
-    }),
-  );
-  if (r.output) output += r.output;
-  if (r.generated_eog) break;
-  if (calls > 80) break;
-}
-
-await llama.remove_prompt_cache({ args: ["--prompt-cache", "prompt.cache"] });
-
+completion = completion.trim();
 const transcript = [
-  `canister_id=${canisterId}`,
+  `router_canister=${routerId}`,
+  `llama_canister=${llamaId}`,
   `model=trp/onchain-qwen-0.5b (Qwen2.5-0.5B-Instruct q8_0)`,
-  `update_calls=${calls}`,
-  `completion=${JSON.stringify(output.trim())}`,
+  `on_chain_update_calls=${updateCalls || "?"}`,
+  `completion=${JSON.stringify(completion)}`,
 ].join("\n");
 
 writeFileSync(join(tmp, "onchain-proof.txt"), transcript);
 console.log(transcript);
-if (!output.trim()) {
-  throw new Error("empty on-chain completion");
+if (!completion || completion.includes("<|") || completion.length > 120) {
+  throw new Error(`unclean completion: ${completion.slice(0, 120)}`);
 }
 console.log("ONCHAIN PROOF OK");

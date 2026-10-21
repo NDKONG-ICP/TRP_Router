@@ -41,11 +41,32 @@ const BASE_ARGS: &[&str] = &[
     "-sp",
 ];
 
+/// Qwen2.5 chat template (matches onicai test_qwen2.py fixtures).
 fn qwen_prompt(user: &str) -> String {
     format!(
         "<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n<|im_start|>user\n{}<|im_end|>\n<|im_start|>assistant\n",
         user.trim()
     )
+}
+
+const STOP_MARKERS: &[&str] = &[
+    "<|im_end|>",
+    "<|im_start|>",
+    "<|im_start|>assistant",
+    "<|im_start|>user",
+    "<|im_start|>system",
+    "<|endoftext|>",
+];
+
+/// Drop ingest-echo tokens, stop at im_end, trim assistant junk.
+fn sanitize_completion(raw: &str) -> String {
+    let mut s = raw.trim().to_string();
+    for marker in STOP_MARKERS {
+        if let Some(i) = s.find(marker) {
+            s.truncate(i);
+        }
+    }
+    s.trim().to_string()
 }
 
 async fn run_update(llama: Principal, args: Vec<String>) -> Result<RunOutputRecord, String> {
@@ -95,7 +116,7 @@ pub async fn complete_qwen(llama: Principal, user_message: &str) -> Result<(Stri
         args.push("1".into());
         let r = run_update(llama, args).await?;
         ingest = r.prompt_remaining;
-        output.push_str(&r.output);
+        // Prompt-ingest steps echo decoded tokens in `output`; ignore until generation.
         if calls > 64 {
             return Err("prompt ingest exceeded call budget".into());
         }
@@ -107,9 +128,20 @@ pub async fn complete_qwen(llama: Principal, user_message: &str) -> Result<(Stri
         args.push("-p".into());
         args.push(String::new());
         args.push("-n".into());
-        args.push("512".into());
+        args.push("32".into());
         let r = run_update(llama, args).await?;
-        output.push_str(&r.output);
+        if !r.output.is_empty() {
+            output.push_str(&r.output);
+            let cleaned = sanitize_completion(&output);
+            if cleaned.len() < output.len() {
+                output = cleaned;
+                break;
+            }
+            if output.contains("<|im_end|>") {
+                output = sanitize_completion(&output);
+                break;
+            }
+        }
         if r.generated_eog {
             break;
         }
@@ -127,7 +159,7 @@ pub async fn complete_qwen(llama: Principal, user_message: &str) -> Result<(Stri
     )
     .await;
 
-    Ok((output.trim().to_string(), calls))
+    Ok((sanitize_completion(&output), calls))
 }
 
 pub fn map_model(model: &str) -> Option<&'static str> {

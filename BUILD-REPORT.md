@@ -1,66 +1,83 @@
-# TRP Router — BUILD REPORT (local replica)
+# TRP Router — BUILD REPORT
 
 **Branch:** `trp-router/build`  
 **Date:** 2026-10-21  
-**Mainnet:** NOT deployed (per hard boundary).
+**Identity:** `ic_deploy_plain`
 
-## Milestones
+## Launch day summary (P1–P7)
 
-| Milestone | Status | Notes |
-|-----------|--------|--------|
-| **M1 blob_store** | **PASS (local)** | `node scripts/test-m1-blob.mjs`: 3.2 MiB chunked upload, SHA-256 commit, `get_chunk` reassembly, `http_request` + streaming callback reassembly. Fixed `StreamingHttpCallback` (`define_function!`) for large-blob HTTP. |
-| **M2 router + images** | **PASS (local)** | `node scripts/test-m2-image.mjs`: zero keys → **pollinations-flux** (402 + JPEG with `Accept: image/*`); image stored at `/blob/<sha256>` in blob_store. On-chain HTTPS outcalls (no worker fallback). |
-| **M3 onicai** | **PASS (local)** | `llama_cpp_qwen25` custom wasm (v0.22.0 prebuilt); GGUF uploaded via `scripts/upload-gguf.mjs`; `load_model` + `set_access` level 1; direct proof `tmp/onchain-proof.txt`; router `POST /v1/chat/completions` → `ONCHAIN=1` / `scripts/test-m3-onchain.mjs`. ~2 `run_update` calls per short prompt on Pocket IC. |
-| **M4 moderation** | **PASS (local)** | Disallowed prompt blocked fail-closed; normal prompt generates. On-chain enhance STAGED (pass-through). |
-| **M5 payments** | **STAGED** | `PAYMENTS_ENABLED=false`; `mock_trp_ledger` deployed; `scripts/test-m5-mock.mjs` verifies gate. |
-| **M6 stake/BYOK/NFT** | **STAGED** | Placeholders in `payments.rs`. |
-| **M7 docs** | **DRAFT** | `README.md`, `docs/OpenAI-SDK-snippet.md` — legal review pending. |
+| Step | Status | Notes |
+|------|--------|--------|
+| **P1** on-chain chat polish | **PASS (local)** | `onchain.rs`: Qwen template, no ingest echo, stop at im_end/endoftext; `tmp/onchain-proof.txt` via router SSE — e.g. `"Hello, how can I help you today?"` (2 update calls). |
+| **P2** mock tokenomics | **PASS (local)** | `PAYMENTS_ENABLED=false`; `test-m5-mock.mjs` + `test-m6-mock.mjs` (oracle fail-closed, stake, BYOK, holder). |
+| **P3** mainnet sizing | **DONE** | See `MAINNET-SIZING.md`. Post–blob deploy wallet **0.278 TC** → **NO-GO** for onicai P5 without top-up. |
+| **P4** gateway mainnet | **PARTIAL** | **blob_store LIVE**; **router_canister STAGED** (wallet below 500B create fee). |
+| **P5** onicai mainnet | **STAGED** | Blocked on cycles (P3 NO-GO). |
+| **P6** flagship UI | **LIVE** | `/router` on `raven_frontend` (obsidian/gold, DRAFT banners). Playground awaits router canister id. |
+| **P7** report | **this file** | Owner actions below. |
 
-## Local replica setup (verified)
+## Mainnet canister IDs
 
-- **dfx 0.29.2** + Pocket IC on `127.0.0.1:8000`.
-- If port 8000 is already in use (e.g. Raven DAPP local network), **reuse** that replica: `cd trp-router && dfx ping && dfx deploy --yes`. Do not run conflicting `dfx start --clean` in two projects without coordinating ports.
-- Standalone trp-router on 8100 was attempted; Pocket IC exited early in this environment — shared 8000 is the supported path for smoke here.
-- Scripts: `npm install` once in `trp-router/` for `@dfinity/agent` tests.
+| Canister | ID | Status |
+|----------|-----|--------|
+| **blob_store** | `5y35h-dyaaa-aaaao-bbqua-cai` | Running; controllers = Plug / OISY / II / Deployer |
+| **router_canister** | — | **Not created** — see cycles |
+| **llama_cpp_qwen25** | — | Staged (local only) |
 
-## Sample outputs
+## Live URLs
 
-- `tmp/m1-pass.json` — last M1 content hash  
-- `tmp/m2-image-response.json` — OpenAI-shaped image response with `provider`  
-- `tmp/m2-status.json` — `/v1/status` provider health  
+| Surface | URL |
+|---------|-----|
+| **UI (DRAFT)** | https://cnl2f-gqaaa-aaaao-a4ngq-cai.icp0.io/router |
+| **OpenAI-compatible API** | **Pending** — `https://<router>.icp0.io/v1` after P4 router deploy |
+| **On-chain blobs** | Via router `/blob/<id>` once router is wired to `5y35h-…` |
 
-## M3 local owner recipe (first time)
+## Local replica (unchanged)
 
-1. `dfx deploy llama_cpp_qwen25 --yes` (after wasm in `vendor/llama_cpp_canister/build/`).
-2. Download Qwen2.5-0.5B q8_0 GGUF; verify sha256 in `VERSIONS.md`.
-3. `node scripts/upload-gguf.mjs` (~338 update calls; controller identity).
-4. `dfx canister call llama_cpp_qwen25 load_model …` (see `README-qwen2.5.md`).
-5. `./scripts/setup-llama-local.sh` (`set_access` + wire router).
-6. `node scripts/onchain-proof.mjs` then `node scripts/test-m3-onchain.mjs`.
+- **dfx 0.29.2**, shared Pocket IC `127.0.0.1:8000`.
+- M1–M4, M3 on-chain chat, M5/M6 mock tests pass after deploy.
 
-**Cycles / limits:** Pocket IC on dfx 0.29; no custom wasm memory bump required for 0.5B q8. Mainnet sizing: plan **3.75 GiB** `wasm_memory_limit` + cycle top-up per onicai README.
+## Milestones (local)
+
+| Milestone | Status |
+|-----------|--------|
+| M1 blob_store | PASS |
+| M2 router + images | PASS |
+| M3 onicai | PASS |
+| M4 moderation | PASS |
+| M5 payments | STAGED (`PAYMENTS_ENABLED=false`; mock logic proven) |
+| M6 stake/BYOK/holder | STAGED (dev endpoints proven) |
+
+## P4 deploy notes (actual cycles)
+
+- Created `blob_store` with **600B** cycles; install needed **~227B** more → deposited **300B** (total ~399B in-canister after install).
+- Wallet fell from **1.178 TC → 0.278 TC**.
+- **router_canister** create failed: wallet canister **out of cycles** (needs **≥500B** create fee + install buffer on top of remaining **278B**).
+
+## Owner actions (required)
+
+1. **Top up deploy wallet** by **≥0.55 TC** (target **≥0.85 TC** on wallet before router + optional onicai). Agent will **not** buy/convert cycles.
+2. Re-run (owner or agent after top-up):
+   ```bash
+   cd trp-router && dfx identity use ic_deploy_plain
+   dfx deploy router_canister --network ic --yes --with-cycles 900_000_000_000
+   dfx canister call router_canister init_router "(principal \"5y35h-dyaaa-aaaao-bbqua-cai\")" --network ic
+   bash scripts/set-mainnet-controllers.sh ic
+   ```
+3. Smoke: `POST https://<router>.icp0.io/v1/images/generations` → Pollinations + `/blob/<id>`.
+4. Set `REACT_APP_TRP_ROUTER_CANISTER_ID` in frontend `.env.production`, rebuild, `dfx deploy raven_frontend --network ic --no-asset-upgrade --yes`.
+5. **Optional:** Cloudflare + Gemini keys → `set_provider_keys` on router (vault only).
+6. **Legal:** DRAFT UI strings on `/router` before public announcement.
+7. **P5 (if wallet allows after P4):** onicai + GGUF upload per `README-qwen2.5.md`; label **BETA** everywhere.
+
+## UI home choice
+
+**`/router` route on `raven_frontend`** — same Ascension aesthetic, one deploy pipeline, no second asset canister.
 
 ## Honest gaps
 
-- **Reproducible wasm from pin `5fa3091`:** local `icpp build-wasm` failed (`decision.cpp` / IC_Async; build from path without spaces recommended). Deployed **release v0.22.0** wasm instead — document any ABI drift if you rebuild from source.
-- **`trp/onchain-llama-3.2-1b`:** not loaded (503).
-- **`POST /v1/images/edits`** → 501 (multipart not implemented).
-- **Small GGUF round-trip** — same blob_store API as M1; not run in automated smoke (add manual upload before M3).
-- **M5–M6** full ICRC-2 pay flow needs `PAYMENTS_ENABLED=true` dev build + expanded tests.
+- Gateway API not on mainnet until router canister is funded.
+- Payments remain off (`PAYMENTS_ENABLED=false`).
+- Reproducible onicai wasm from pin `5fa3091` still blocked locally; **v0.22.0** prebuilt in use.
 
-## Provider / key status
-
-| Provider | Keys | Local demo |
-|----------|------|------------|
-| Pollinations | None | Works with `Accept: image/*` (HTTP 402 + body) |
-| Cloudflare FLUX | Account + token | Skipped when unset |
-| Gemini image | API key | Skipped when unset |
-
-## Owner next steps
-
-1. `./scripts/smoke-local.sh` with replica healthy on :8000.
-2. Vendor/build onicai at pinned commit; load GGUF via blob_store; wire M3 SSE chat.
-3. Legal review → remove DRAFT banners.
-4. After TRP mint: mock → real ledger; mainnet deploy + cycles (out of scope for this run).
-
-See `VERSIONS.md` for pins.
+See `VERSIONS.md`, `MAINNET-SIZING.md`.

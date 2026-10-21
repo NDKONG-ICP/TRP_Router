@@ -25,6 +25,8 @@ type RouterStatus = record {
   onchain_models_ready : bool;
 };
 
+type QuoteResult = variant { ok : nat; err : text };
+
 service : {
   init_router : (principal) -> (); // blob_store canister id
   set_llama_qwen25 : (principal) -> (); // llama_cpp_qwen25 canister id (M3)
@@ -32,7 +34,11 @@ service : {
   http_request_update : (HttpRequest) -> (HttpResponse);
   http_request : (HttpRequest) -> (HttpResponse) query;
   router_status : () -> (RouterStatus) query;
-  // M5 staged (local mock only)
-  pay_with_mock_trp_quote : (nat) -> (variant { ok : nat; err : text }) query;
+  pay_with_mock_trp_quote : (nat) -> (QuoteResult) query;
   credit_balance : () -> (nat) query;
+  dev_exercise_m5_oracle : (nat, nat) -> (QuoteResult);
+  dev_exercise_m5_stale_oracle : (nat) -> (QuoteResult);
+  dev_exercise_m6_stake : (nat) -> (nat);
+  dev_exercise_m6_byok : (bool) -> (nat);
+  dev_exercise_m6_holder : (nat32) -> (bool);
 };
