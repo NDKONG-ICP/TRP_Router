@@ -1,5 +1,8 @@
 {
   "blob_store": {
     "ic": "5y35h-dyaaa-aaaao-bbqua-cai"
+  },
+  "router_canister": {
+    "ic": "5723t-oaaaa-aaaao-bbquq-cai"
   }
 }
