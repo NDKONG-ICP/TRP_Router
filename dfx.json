@@ -1,0 +1,36 @@
+{
+  "version": 1,
+  "dfx": "0.29.2",
+  "canisters": {
+    "blob_store": {
+      "type": "rust",
+      "package": "blob_store",
+      "candid": "blob_store.did"
+    },
+    "router_canister": {
+      "type": "rust",
+      "package": "router_canister",
+      "candid": "router_canister.did",
+      "dependencies": ["blob_store"]
+    },
+    "mock_trp_ledger": {
+      "type": "rust",
+      "package": "mock_trp_ledger",
+      "candid": "mock_trp_ledger.did"
+    }
+  },
+  "defaults": {
+    "build": {
+      "packtool": ""
+    },
+    "canister_http": {
+      "enabled": true
+    }
+  },
+  "networks": {
+    "local": {
+      "bind": "127.0.0.1:8000",
+      "type": "ephemeral"
+    }
+  }
+}

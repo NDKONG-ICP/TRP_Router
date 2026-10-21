@@ -1,0 +1,8 @@
+[workspace]
+members = ["blob_store", "router_canister", "mock_trp_ledger"]
+resolver = "2"
+
+[profile.release]
+opt-level = "z"
+lto = true
+strip = true

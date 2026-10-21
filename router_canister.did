@@ -1,0 +1,37 @@
+type HeaderField = record { text; text };
+type HttpRequest = record {
+  method : text;
+  url : text;
+  headers : vec HeaderField;
+  body : blob;
+};
+type HttpResponse = record {
+  status_code : nat16;
+  headers : vec HeaderField;
+  body : blob;
+  streaming_strategy : opt null;
+};
+
+type ProviderHealth = record {
+  name : text;
+  healthy : bool;
+  last_error : opt text;
+  circuit_open : bool;
+};
+
+type RouterStatus = record {
+  providers : vec ProviderHealth;
+  payments_enabled : bool;
+  onchain_models_ready : bool;
+};
+
+service : {
+  init_router : (principal) -> (); // blob_store canister id
+  set_provider_keys : (opt text, opt text, opt text) -> (); // cloudflare acct, cf token, gemini (admin)
+  http_request_update : (HttpRequest) -> (HttpResponse);
+  http_request : (HttpRequest) -> (HttpResponse) query;
+  router_status : () -> (RouterStatus) query;
+  // M5 staged (local mock only)
+  pay_with_mock_trp_quote : (nat) -> (variant { ok : nat; err : text }) query;
+  credit_balance : () -> (nat) query;
+};

@@ -1,0 +1,5 @@
+.dfx/
+target/
+node_modules/
+tmp/
+.env

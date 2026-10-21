@@ -1,0 +1,102 @@
+// =============================================================================
+// TRP Router — blob_store canister interface (content-addressed on-chain storage)
+// =============================================================================
+// Stores: generated images, onicai GGUF model weights, user presets, reference
+// images (e.g. Captain identity-lock PNG), datasets. Content-addressed by SHA-256.
+// Large blobs are uploaded CHUNKED and live in stable memory (~400-500 GiB/canister).
+// Images are served over HTTP at /blob/<id> (asset view, with streaming for >2 MiB).
+//
+// Build target contract — do not change signatures without updating callers
+// (router_canister, onicai model loader, image pipeline).
+// =============================================================================
+
+type UploadId = text;        // opaque, server-issued, per in-flight upload
+type BlobId    = text;       // lowercase hex SHA-256 of the full content (the address)
+
+type BlobKind = variant {
+  Image;        // generated output (png/jpeg) — served over HTTP
+  Model;        // GGUF weights for onicai llama_cpp_canister
+  Preset;       // versioned {model,instructions,tools,routing}
+  Reference;    // identity-lock / LoRA / reference image
+  Dataset;      // RAG / on-chain inference corpus
+  Other;
+};
+
+type NewUpload = record {
+  content_type : text;       // e.g. "image/png", "model/gguf", "application/json"
+  total_size   : nat64;      // expected total bytes (for validation)
+  kind         : BlobKind;
+  filename     : opt text;
+};
+
+type UploadProgress = record {
+  upload_id : UploadId;
+  received  : nat64;         // bytes committed so far
+  chunks    : nat32;         // chunks received so far
+};
+
+type BlobMeta = record {
+  id           : BlobId;     // = SHA-256 of content (content address)
+  content_type : text;
+  size         : nat64;
+  kind         : BlobKind;
+  filename     : opt text;
+  owner        : principal;  // uploader's principal
+  created_at   : nat64;      // ns since epoch
+  chunk_size   : nat32;      // bytes per chunk (e.g. 1_900_000)
+  chunk_count  : nat32;
+};
+
+type CommitResult = variant { ok : BlobMeta; err : text };
+type UnitResult   = variant { ok; err : text };
+
+// HTTP gateway types (serve images at /blob/<id>)
+type HeaderField = record { text; text };
+type HttpRequest = record {
+  method  : text;
+  url     : text;
+  headers : vec HeaderField;
+  body    : blob;
+};
+type StreamingToken = record { id : BlobId; index : nat32 };
+type StreamingCallbackResponse = record { body : blob; token : opt StreamingToken };
+type StreamingStrategy = variant {
+  Callback : record { callback : func (StreamingToken) -> (StreamingCallbackResponse) query; token : StreamingToken };
+};
+type HttpResponse = record {
+  status_code       : nat16;
+  headers           : vec HeaderField;
+  body              : blob;
+  streaming_strategy : opt StreamingStrategy;   // used when blob > ~2 MiB message cap
+};
+
+type Stats = record {
+  blobs             : nat64;
+  bytes             : nat64;
+  uploads_in_flight : nat32;
+  stable_used_bytes : nat64;
+};
+
+service : {
+  // ---- chunked upload (begin -> put_chunk* -> commit) ----
+  begin_upload  : (NewUpload) -> (UploadId);
+  put_chunk     : (UploadId, nat32, blob) -> (UploadProgress);   // (upload_id, index, bytes)
+  // commit verifies the assembled SHA-256 == expected_sha256_hex; rejects (err) on mismatch,
+  // so a corrupted/partial upload can never masquerade as a valid content address.
+  commit_upload : (UploadId, text) -> (CommitResult);            // text = expected sha256 hex
+  abort_upload  : (UploadId) -> ();
+
+  // ---- reads ----
+  get_meta  : (BlobId) -> (opt BlobMeta) query;
+  get_chunk : (BlobId, nat32) -> (opt blob) query;               // programmatic byte reads
+  exists    : (BlobId) -> (bool) query;
+
+  // ---- HTTP asset view: GET /blob/<id> streams the bytes with content_type ----
+  http_request : (HttpRequest) -> (HttpResponse) query;
+  http_request_streaming_callback : (StreamingToken) -> (StreamingCallbackResponse) query;
+
+  // ---- admin (canonical owner set + router_canister principal only) ----
+  delete_blob : (BlobId) -> (UnitResult);          // only unreferenced blobs; audited
+  set_admins  : (vec principal) -> (UnitResult);
+  stats       : () -> (Stats) query;
+}
