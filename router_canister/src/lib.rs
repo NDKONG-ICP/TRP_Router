@@ -1,6 +1,7 @@
 mod blob_client;
 mod image_providers;
 mod moderation;
+mod onchain;
 mod payments;
 
 use candid::{CandidType, Deserialize, Principal};
@@ -53,6 +54,7 @@ use candid::Nat;
 
 thread_local! {
     static BLOB_STORE: RefCell<Option<Principal>> = RefCell::new(None);
+    static LLAMA_QWEN25: RefCell<Option<Principal>> = RefCell::new(None);
     static CF_ACCT: RefCell<Option<String>> = RefCell::new(None);
     static CF_TOKEN: RefCell<Option<String>> = RefCell::new(None);
     static GEMINI_KEY: RefCell<Option<String>> = RefCell::new(None);
@@ -100,6 +102,11 @@ fn init_router(blob_store: Principal) {
 }
 
 #[update]
+fn set_llama_qwen25(llama: Principal) {
+    LLAMA_QWEN25.with(|l| *l.borrow_mut() = Some(llama));
+}
+
+#[update]
 fn set_provider_keys(cf_acct: Option<String>, cf_token: Option<String>, gemini: Option<String>) {
     // Local vault: admin-only; never log values.
     CF_ACCT.with(|a| *a.borrow_mut() = cf_acct);
@@ -126,7 +133,7 @@ fn router_status() -> RouterStatus {
             mk("pollinations-flux"),
         ],
         payments_enabled: PAYMENTS_ENABLED,
-        onchain_models_ready: false,
+        onchain_models_ready: LLAMA_QWEN25.with(|l| l.borrow().is_some()),
     }
 }
 
@@ -193,16 +200,69 @@ async fn handle_chat(body: &[u8]) -> HttpResponse {
         Err(e) => return json_response(400, &format!(r#"{{"error":"{e}"}}"#)),
     };
     if parsed.model.starts_with("trp/onchain-") {
-        return json_response(
-            503,
-            r#"{"error":"on-chain onicai tier STAGED — build vendor/llama_cpp_canister (see VERSIONS.md)"}"#,
-        );
+        if onchain::map_model(&parsed.model) != Some("qwen25") {
+            return json_response(
+                503,
+                r#"{"error":"on-chain model not loaded locally (only trp/onchain-qwen-0.5b is wired)"}"#,
+            );
+        }
+        let Some(llama) = LLAMA_QWEN25.with(|l| l.borrow().clone()) else {
+            return json_response(
+                503,
+                r#"{"error":"llama_cpp_qwen25 canister not configured (call set_llama_qwen25)"}"#,
+            );
+        };
+        let msgs: Vec<onchain::ChatMsg> = parsed
+            .messages
+            .into_iter()
+            .map(|m| onchain::ChatMsg {
+                role: m.role,
+                content: m.content,
+            })
+            .collect();
+        let Some(user) = onchain::last_user_message(&msgs) else {
+            return json_response(400, r#"{"error":"messages must include a user turn"}"#);
+        };
+        let (text, calls) = match onchain::complete_qwen(llama, &user).await {
+            Ok(v) => v,
+            Err(e) => return json_response(502, &format!(r#"{{"error":"{e}"}}"#)),
+        };
+        if text.is_empty() {
+            return json_response(502, r#"{"error":"empty on-chain completion"}"#);
+        }
+        return sse_chat_response(&parsed.model, &text, calls);
     }
     let _ = parsed.messages;
     json_response(
         501,
         r#"{"error":"off-chain chat outcalls staged for R2; use trp/onchain-* after onicai build"}"#,
     )
+}
+
+fn sse_chat_response(model: &str, content: &str, update_calls: u32) -> HttpResponse {
+    let escaped: String = content
+        .chars()
+        .flat_map(|c| match c {
+            '"' => "\\\"".chars().collect::<Vec<_>>(),
+            '\n' => "\\n".chars().collect::<Vec<_>>(),
+            '\r' => "\\r".chars().collect::<Vec<_>>(),
+            other => vec![other],
+        })
+        .collect();
+    let chunk = format!(
+        r#"data: {{"id":"trp-onchain","object":"chat.completion.chunk","model":"{model}","choices":[{{"index":0,"delta":{{"content":"{escaped}"}},"finish_reason":null}}],"on_chain_update_calls":{update_calls}}}"#,
+    );
+    let body = format!("{chunk}\n\ndata: [DONE]\n\n");
+    HttpResponse {
+        status_code: 200,
+        headers: vec![
+            HeaderField("Content-Type".into(), "text/event-stream".into()),
+            HeaderField("Cache-Control".into(), "no-cache".into()),
+            HeaderField("X-TRP-On-Chain".into(), "true".into()),
+        ],
+        body: body.into_bytes(),
+        streaming_strategy: None,
+    }
 }
 
 fn handle_models() -> HttpResponse {

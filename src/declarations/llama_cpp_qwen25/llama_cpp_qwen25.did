@@ -1,0 +1,453 @@
+// Always return a single record wrapped in a variant
+type StatusCode = nat16;
+
+type InputRecord = record {
+  args : vec text; // the CLI args of llama.cpp/examples/main, as a list of strings
+};
+
+// to avoid hitting the IC's instructions limit
+// 0 = no limit (default)
+type MaxTokensRecord = record {
+  max_tokens_update : nat64;
+  max_tokens_query : nat64
+};
+
+type RunOutputRecord = record {
+  status_code : StatusCode;
+  output : text;
+  conversation : text;
+  error : text;
+  prompt_remaining : text;
+  generated_eog : bool;
+  // Exact token accounting, populated only on a run_update / run_query success
+  // record; `opt` so other OutputRecordResult producers (errors, new_chat,
+  // load_model, ...) may omit them (they decode as null). See the "Exact
+  // token accounting" note in the README run_update section.
+  n_prompt_tokens : opt nat64;
+  n_prompt_tokens_cached : opt nat64;
+  n_prompt_tokens_decoded : opt nat64;
+  n_tokens_generated : opt nat64;
+  n_prompt_tokens_remaining : opt nat64;
+  // run_update_full only: true when the response was cut short (the canister
+  // is stopping, or the chunk cap was reached). Continue it with run_update.
+  partial : opt bool
+};
+type OutputRecordResult = variant {
+  Ok : RunOutputRecord;
+  Err : RunOutputRecord
+};
+
+// -----------------------------------------
+type ApiError = variant {
+  Other : text;
+  StatusCode : nat16
+};
+
+// HTTPS status code wrapped in a Record wrapped in a Result
+type StatusCodeRecordResult = variant {
+  Err : ApiError;
+  Ok : StatusCodeRecord
+};
+type StatusCodeRecord = record { status_code : nat16 };
+
+// -----------------------------------------------------
+type FileDownloadInputRecord = record {
+  filename : text;
+  chunksize : nat64;
+  offset : nat64
+};
+type FileDownloadRecordResult = variant {
+  Err : ApiError;
+  Ok : FileDownloadRecord
+};
+type FileDownloadRecord = record {
+  chunk : vec nat8; // the chunk read from the file, as a vec of bytes
+  chunksize : nat64; // the chunksize in bytes
+  filesize : nat64; // the total filesize in bytes
+  offset : nat64; // the chunk starts here (bytes from beginning)
+  done : bool; // true if there are no more bytes to read
+};
+
+// -----------------------------------------------------
+type FileUploadInputRecord = record {
+  filename : text;
+  chunk : vec nat8; // the chunk being uploaded, as a vec of bytes
+  chunksize : nat64; // the chunksize (allowing sanity check)
+  offset : nat64; // the offset where to write the chunk
+};
+type FileUploadRecordResult = variant {
+  Err : ApiError;
+  Ok : FileUploadRecord
+};
+type FileUploadRecord = record {
+  filename : text; // the total filesize in bytes
+  filesize : nat64; // the total filesize in bytes after writing chunk at offset
+  filesha256 : text; // the total filesize in bytes after writing chunk at offset
+};
+
+// -----------------------------------------------------
+type FileDetailsInputRecord = record {
+  filename : text
+};
+type FileDetailsRecordResult = variant {
+  Err : ApiError;
+  Ok : FileDetailsRecord
+};
+type FileDetailsRecord = record {
+  filename : text;
+  filesize : nat64; // the total filesize in bytes
+  filesha256 : text; // the sha256 of the file
+};
+
+// -----------------------------------------------------
+type GetChatsRecordResult = variant {
+  Err : ApiError;
+  Ok : GetChatsRecord
+};
+type GetChatsRecord = record {
+  chats : vec record {
+    timestamp : text;
+    chat : text
+  }
+};
+
+// -----------------------------------------------------
+type CopyPromptCacheInputRecord = record {
+  from : text;
+  to : text
+};
+
+// -----------------------------------------------------
+type DownloadPromptCacheInputRecord = record {
+  promptcache : text;
+  chunksize : nat64;
+  offset : nat64
+};
+
+// -----------------------------------------------------
+type UploadPromptCacheInputRecord = record {
+  promptcache : text;
+  chunk : vec nat8;
+  chunksize : nat64;
+  offset : nat64
+};
+
+// -----------------------------------------------------
+type PromptCacheDetailsInputRecord = record {
+  promptcache : text
+};
+
+// -----------------------------------------------------
+// Access level
+// 0 = only controllers
+// 1 = all except anonymous
+type AccessInputRecord = record {
+  level : nat16
+};
+type AccessRecordResult = variant {
+  Err : ApiError;
+  Ok : AccessRecord
+};
+type AccessRecord = record {
+  level : nat16;
+  explanation : text
+};
+
+// -----------------------------------------------------
+// Admin RBAC Types (match PoAIW structure, use existing ApiError)
+// -----------------------------------------------------
+type AdminRole = variant {
+  AdminQuery;
+  AdminUpdate
+};
+
+type AdminRoleAssignment = record {
+  assignedAt : nat64;
+  assignedBy : text;
+  note : text;
+  "principal" : text;
+  role : AdminRole
+};
+
+type AssignAdminRoleInputRecord = record {
+  note : text;
+  "principal" : text;
+  role : AdminRole
+};
+
+// Uses EXISTING ApiError type (NOT modified)
+type AdminRoleAssignmentResult = variant {
+  Err : ApiError;
+  Ok : AdminRoleAssignment
+};
+
+// Uses EXISTING ApiError type (NOT modified)
+type AdminRoleAssignmentsResult = variant {
+  Err : ApiError;
+  Ok : vec AdminRoleAssignment
+};
+
+// Uses EXISTING ApiError type (NOT modified)
+type TextResult = variant {
+  Err : ApiError;
+  Ok : text
+};
+
+// -----------------------------------------------------
+type FilesystemFileSizeInputRecord = record {
+  filename : text
+};
+type FilesystemFileSizeRecordResult = variant {
+  Err : ApiError;
+  Ok : FilesystemFileSizeRecord
+};
+type FilesystemFileSizeRecord = record {
+  exists : bool;
+  filename : text;
+  filesize : nat64; // the total filesize in bytes
+  msg : text
+};
+
+// -----------------------------------------------------
+type FilesystemTimestampInputRecord = record {
+  filename : text
+};
+type FilesystemTimestampRecordResult = variant {
+  Err : ApiError;
+  Ok : FilesystemTimestampRecord
+};
+type FilesystemTimestampRecord = record {
+  exists : bool;
+  filename : text;
+  timestamp_ns : nat64; // the file creation timestamp in nanoseconds
+  age_seconds : nat64; // the file creation age in seconds
+  msg : text
+};
+
+// -----------------------------------------------------
+type FilesystemRemoveInputRecord = record {
+  filename : text
+};
+type FilesystemRemoveRecordResult = variant {
+  Err : ApiError;
+  Ok : FilesystemRemoveRecord
+};
+type FilesystemRemoveRecord = record {
+  exists : bool;
+  removed : bool;
+  filename : text;
+  msg : text
+};
+
+// -----------------------------------------------------
+type DirContentInputRecord = record {
+  dir : text;
+  max_entries : nat64; // the maximum number of entries to return; 0 = no limit
+};
+type DirContentRecordResult = variant {
+  Err : ApiError;
+  Ok : DirContentVec
+};
+type DirContentVec = vec FileEntry;
+type FileEntry = record {
+  filename : text;
+  filetype : text; // "file" or "directory"
+};
+
+// -----------------------------------------------------
+// Recurring prompt-cache cleanup timer
+type CacheCleanupResult = variant {
+  Err : ApiError;
+  Ok : CacheCleanupActionRecord
+};
+type CacheCleanupActionRecord = record {
+  ok : bool;
+  is_running : bool
+};
+
+type CacheCleanupStatsResult = variant {
+  Err : ApiError;
+  Ok : CacheCleanupStatsRecord
+};
+type CacheCleanupStatsRecord = record {
+  runs : nat64;
+  files_examined : nat64;
+  files_deleted : nat64;
+  files_failed : nat64;
+  last_run_ns : nat64;       // host-clock timestamp via IC_API::time(); reporting only
+  period_seconds : nat64;
+  ttl_seconds : nat64;
+  max_files_per_run : nat64;
+  is_running : bool;
+  max_decision_states : opt nat64 // stored kev decision states per canister (0 = no limit)
+};
+
+type CacheCleanupConfigInput = record {
+  // Each opt: null = no change.
+  // period_seconds : opt 0 silently rejected (preserves prior).
+  // ttl_seconds    : opt 0 valid ("delete everything older than 0 ns").
+  // max_files_per_run : opt 0 clamped to floor (1).
+  // max_decision_states : opt 0 = no limit (default 256, ~20 MB each).
+  // The config and whether the timer runs survive an upgrade.
+  period_seconds : opt nat64;
+  ttl_seconds : opt nat64;
+  max_files_per_run : opt nat64;
+  max_decision_states : opt nat64
+};
+type CacheCleanupConfigResult = variant {
+  Err : ApiError;
+  Ok : CacheCleanupConfigRecord
+};
+type CacheCleanupConfigRecord = record {
+  period_seconds : nat64;
+  ttl_seconds : nat64;
+  max_files_per_run : nat64;
+  is_running : bool;
+  max_decision_states : opt nat64
+};
+
+// -----------------------------------------------------
+// Recurring cycle-balance monitor
+type CycleBalanceRecord = record {
+  cycle_balance : nat;       // the live canister cycle balance (128-bit)
+  updated_at_ns : nat64      // IC_API::time() of the call
+};
+type CycleBalanceRecordResult = variant {
+  Err : ApiError;
+  Ok : CycleBalanceRecord
+};
+
+// -----------------------------------------------------
+// Memory-status report (non-anonymous callers)
+type MemoryStatusRecord = record {
+  wasm_heap_bytes : nat64;   // wasm linear-memory high-water-mark (approaches wasm_memory_limit)
+  stable_bytes : nat64       // stable memory: uploaded model file + virtual filesystem
+};
+type MemoryStatusRecordResult = variant {
+  Err : ApiError;            // includes access-denied for anonymous callers
+  Ok : MemoryStatusRecord
+};
+
+// -----------------------------------------------------
+// Decision models (System One): see README-decision-models.md
+// Flat tables (icpp-pro decodes a vec record as a record of vecs), linked by
+// question id. Rows keep the request order.
+type DecisionKind = variant { choice; score; noul };
+type DecisionInputRecord = record {
+  state : variant { Text : text; Json : text };  // Json is parsed, so the template sees structure
+  questions : vec record { id : text; kind : DecisionKind; instructions : text };
+  // choice: one row per option; score: one row per level, in order (2..10);
+  // noul: optional rows with key "true" / "false". description "" = none
+  options : vec record { question_id : text; key : text; description : text };
+  // kev: store the caller's states below this sub-directory, e.g. one per end
+  // user of a gateway. 1-63 characters of a-z, 0-9 and -. null = no sub-directory
+  scope : opt text;
+};
+type DecisionOutputRecord = record {
+  // every question answered so far: this call and earlier calls of the same request
+  // choice: choice + confidence; score: score (expected level index) + confidence;
+  // noul: yes (probability of yes). Unused fields are "" / 0.0
+  answers : vec record { id : text; kind : DecisionKind; choice : text;
+                         score : float64; yes : float64; confidence : float64 };
+  probabilities : vec record { question_id : text; key : text; probability : float64 };
+  input_tokens : nat64;   // tokens evaluated in THIS call
+  pending : vec text;     // question ids not answered yet: re-send the same request
+  // kev models (e.g. Kev-0.8B) store the state per caller, ingesting it over calls:
+  // its size in tokens, and how many are not stored yet (0 = stored). null for laya
+  state_tokens : opt nat64;
+  state_tokens_remaining : opt nat64;
+  state_key : opt text;     // kev: the name of the stored state (pin_decision_state)
+  instructions : opt nat64; // the instructions this call used, over all its messages (call context counter)
+};
+type DecisionPinInputRecord = record {
+  scope : text;     // "" = the states of requests without a scope
+  state_key : text;
+  until_ns : nat64; // IC time: the caps and the cleanup timer keep the state until then
+};
+type DecisionUnpinInputRecord = record { scope : text; state_key : text };
+type DecisionResult = variant {
+  Err : ApiError;
+  Ok : DecisionOutputRecord
+};
+
+// -----------------------------------------------------
+// The endpoint services of our canister
+service : {
+  // canister
+  health : () -> (StatusCodeRecordResult) query;
+  ready : () -> (StatusCodeRecordResult) query;
+
+  // model endpoints
+  load_model : (InputRecord) -> (OutputRecordResult);
+  set_max_tokens : (MaxTokensRecord) -> (StatusCodeRecordResult);
+  get_max_tokens : () -> (MaxTokensRecord) query;
+
+  // upload, download & removal of files
+  file_download_chunk : (FileDownloadInputRecord) -> (FileDownloadRecordResult) query;
+  file_upload_chunk : (FileUploadInputRecord) -> (FileUploadRecordResult);
+  uploaded_file_details : (FileDetailsInputRecord) -> (FileDetailsRecordResult) query;
+
+  // Inference endpoints
+  new_chat : (InputRecord) -> (OutputRecordResult);
+  run_query : (InputRecord) -> (OutputRecordResult) query;
+  run_update : (InputRecord) -> (OutputRecordResult);
+  run_update_full : (InputRecord) -> (OutputRecordResult); // the whole response in one call (self-call yields)
+  run_decision : (DecisionInputRecord) -> (DecisionResult);
+  run_decision_full : (DecisionInputRecord) -> (DecisionResult); // the whole request in one call (self-call yields)
+  remove_decision_scope : (text) -> (StatusCodeRecordResult); // all of the caller's files of a scope
+  pin_decision_state : (DecisionPinInputRecord) -> (StatusCodeRecordResult);
+  unpin_decision_state : (DecisionUnpinInputRecord) -> (StatusCodeRecordResult);
+
+  // Prompt cache endpoints
+  remove_prompt_cache : (InputRecord) -> (OutputRecordResult);
+  copy_prompt_cache : (CopyPromptCacheInputRecord) -> (StatusCodeRecordResult);
+  download_prompt_cache_chunk : (DownloadPromptCacheInputRecord) -> (FileDownloadRecordResult) query;
+  upload_prompt_cache_chunk : (UploadPromptCacheInputRecord) -> (FileUploadRecordResult);
+  uploaded_prompt_cache_details : (PromptCacheDetailsInputRecord) -> (FileDetailsRecordResult) query;
+
+  // Files - general utility endpoints exposing std::filesystem functions
+  filesystem_remove : (FilesystemRemoveInputRecord) -> (FilesystemRemoveRecordResult);
+  filesystem_file_size : (FilesystemFileSizeInputRecord) -> (FilesystemFileSizeRecordResult) query;
+  get_creation_timestamp_ns : (FilesystemTimestampInputRecord) -> (FilesystemTimestampRecordResult) query;
+  recursive_dir_content_query : (DirContentInputRecord) -> (DirContentRecordResult) query;
+  recursive_dir_content_update : (DirContentInputRecord) -> (DirContentRecordResult);
+
+  // Recurring prompt-cache cleanup timer (admin-only)
+  cache_cleanup_start_timer : () -> (CacheCleanupResult);
+  cache_cleanup_stop_timer : () -> (CacheCleanupResult);
+  cache_cleanup_now : () -> (CacheCleanupStatsResult);
+  get_cache_cleanup_stats : () -> (CacheCleanupStatsResult) query;
+  set_cache_cleanup_config : (CacheCleanupConfigInput) -> (CacheCleanupConfigResult);
+
+  // Recurring cycle-balance monitor (admin-only)
+  cycle_balance_start_timer : () -> (StatusCodeRecordResult);
+  cycle_balance_stop_timer : () -> (StatusCodeRecordResult);
+  get_cycle_balance : () -> (CycleBalanceRecordResult) query;
+
+  // Memory-status report (non-anonymous callers)
+  get_memory_status : () -> (MemoryStatusRecordResult) query;
+
+  // Logging endpoints
+  remove_log_file : (InputRecord) -> (OutputRecordResult);
+  log_pause : () -> (StatusCodeRecordResult);
+  log_resume : () -> (StatusCodeRecordResult);
+
+  // Chats retrieval
+  chats_pause : () -> (StatusCodeRecordResult);
+  chats_resume : () -> (StatusCodeRecordResult);
+  get_chats : () -> (GetChatsRecordResult) query;
+
+  // Access level
+  set_access : (AccessInputRecord) -> (AccessRecordResult);
+  get_access : () -> (AccessRecordResult) query;
+  check_access : () -> (StatusCodeRecordResult) query;
+
+  // Other admin endpoints
+  whoami : () -> (text) query;
+
+  // Admin RBAC Management (Controller-only)
+  assignAdminRole : (AssignAdminRoleInputRecord) -> (AdminRoleAssignmentResult);
+  revokeAdminRole : (text) -> (TextResult);
+  getAdminRoles : () -> (AdminRoleAssignmentsResult) query;
+
+}

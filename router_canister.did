@@ -27,6 +27,7 @@ type RouterStatus = record {
 
 service : {
   init_router : (principal) -> (); // blob_store canister id
+  set_llama_qwen25 : (principal) -> (); // llama_cpp_qwen25 canister id (M3)
   set_provider_keys : (opt text, opt text, opt text) -> (); // cloudflare acct, cf token, gemini (admin)
   http_request_update : (HttpRequest) -> (HttpResponse);
   http_request : (HttpRequest) -> (HttpResponse) query;

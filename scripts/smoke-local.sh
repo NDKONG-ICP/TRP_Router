@@ -23,12 +23,12 @@ node scripts/test-m1-blob.mjs | tee tmp/m1.log
 echo "=== M2 image + M4 moderation ==="
 node scripts/test-m2-image.mjs | tee tmp/m2.log
 
-echo "=== M3 on-chain chat (staged) ==="
-run_dfx canister call router_canister http_request_update '(record {
-  method="POST"; url="/v1/chat/completions";
-  headers=vec {};
-  body=blob "7b226d6f64656c223a227472702f6f6e636861696e2d6c6c616d612d332e322d3162222c226d65737361676573223a5b7b22726f6c65223a2275736572222c22636f6e74656e74223a226869227d5d7d";
-})' 2>&1 | tee tmp/m3-staged.log | head -8
+if [[ "${ONCHAIN:-0}" == "1" ]]; then
+  echo "=== M3 on-chain chat (requires llama_cpp_qwen25 deployed + model loaded) ==="
+  node scripts/test-m3-onchain.mjs | tee tmp/m3.log
+else
+  echo "=== M3 skipped (set ONCHAIN=1 after model upload + load) ==="
+fi
 
 if [[ -f scripts/test-m5-mock.mjs ]]; then
   echo "=== M5–M6 mock (staged) ==="

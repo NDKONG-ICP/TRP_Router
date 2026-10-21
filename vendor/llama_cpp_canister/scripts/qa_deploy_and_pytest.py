@@ -1,0 +1,317 @@
+"""Deploys & runs pytest in a freshly started local network for some LLMs"""
+
+import os
+import sys
+from pathlib import Path
+from typing import Any, Dict, List
+import subprocess
+import typer
+from icpp.run_shell_cmd import run_shell_cmd
+
+# SCRIPTS_PATH = Path(__file__).parent
+ROOT_PATH = Path(__file__).parent.parent
+
+# The identity to deploy & test as. icpp-pro >= 6.0.0 never uses the
+# machine-wide active identity (`icp identity default`), because any other
+# process can change it mid-run. The `test-llm-wasm` Makefile target creates the
+# identity and exports it; pytest inherits it through the environment, and every
+# icp command below passes it explicitly.
+IDENTITY_ENV_VAR = "ICPP_PRO_TEST_IDENTITY"
+
+
+def get_identity() -> str:
+    """Returns the identity to deploy & test as, or exits with instructions."""
+    identity = os.environ.get(IDENTITY_ENV_VAR, "").strip()
+    if not identity:
+        typer.echo(
+            f"\nERROR: ${IDENTITY_ENV_VAR} is not set.\n\n"
+            "The canister must be deployed by the same identity the tests call\n"
+            "as, because a canister's controller is whoever deployed it.\n\n"
+            "Run this via the Makefile, which creates & exports it:\n\n"
+            "    make test-llm-wasm\n\n"
+            "or set it yourself:\n\n"
+            "    icp identity new <name> --storage plaintext\n"
+            f"    export {IDENTITY_ENV_VAR}=<name>\n"
+        )
+        sys.exit(1)
+    return identity
+
+
+def icp_network_stop() -> None:
+    """Stop the local network, tolerating a non-zero exit when none is running.
+
+    `icp network stop` returns non-zero when there is no running network, which
+    is not a failure for our purposes (dfx's `stop` was lenient about this).
+    """
+    subprocess.run(["icp", "network", "stop"], cwd=ROOT_PATH, check=False)
+
+
+# Set SKIP_BUILD_WASM=1 to test a wasm that is already in build/, instead of
+# rebuilding it here.
+#
+# That is how CI tests the RELEASED artifact: `make docker-build-wasm` builds the
+# wasm in the pinned Docker image and copies it to build/llama_cpp.wasm, which is
+# what icp.yaml installs (every canister is declared `pre-built`). Rebuilding here
+# would silently replace it with a host build, so the QA would be testing
+# different bytes than the ones that ship.
+SKIP_BUILD_WASM_ENV_VAR = "SKIP_BUILD_WASM"
+
+
+def skip_build_wasm() -> bool:
+    """True if the wasm already in build/ should be tested as-is."""
+    return os.environ.get(SKIP_BUILD_WASM_ENV_VAR, "").strip() not in ("", "0")
+
+
+def running_in_ci() -> bool:
+    """True under GitHub Actions. Used to skip `local_only` model iterations
+    (the large fleet-faithful models that time out the hosted runner)."""
+    return os.environ.get("GITHUB_ACTIONS", "").strip().lower() == "true"
+
+
+def main() -> int:
+    """Start local network; Deploy canister; Upload LLM model; Pytest"""
+    identity = get_identity()
+    identity_arg = f" --identity {identity} "
+    try:
+        typer.echo(f"--\nDeploying & testing as identity: {identity}")
+
+        wasm_path = ROOT_PATH / "build" / "llama_cpp.wasm"
+        if skip_build_wasm():
+            if not wasm_path.is_file():
+                typer.echo(
+                    f"\nERROR: ${SKIP_BUILD_WASM_ENV_VAR} is set, but there is no\n"
+                    f"       {wasm_path}\n\n"
+                    "Build it first with:\n\n"
+                    "    make docker-build-wasm\n"
+                )
+                return 1
+            typer.echo(
+                f"--\nSkipping the wasm build (${SKIP_BUILD_WASM_ENV_VAR} is set).\n"
+                f"   Testing the wasm already in build/, as-is."
+            )
+            run_shell_cmd(f"shasum -a 256 {wasm_path}", cwd=ROOT_PATH)
+        else:
+            typer.echo("--\nBuild the wasm")
+            run_shell_cmd(
+                "icpp build-wasm --to-compile all",
+                cwd=ROOT_PATH,
+            )
+
+        # Tests shared across every model iteration (model-agnostic).
+        shared = [
+            "test/test_canister_functions.py",
+            "test/test_promptcache.py",
+            "test/test_files.py",
+            "test/test_cycle_balance.py",
+        ]
+
+        # Each entry deploys a fresh canister, uploads its model, and runs its own
+        # test_paths. `env` is applied to every pytest run in that iteration (used
+        # to point test_small_maxtokens at the right model / KV type). The
+        # small-max_tokens prompt-cache regression is run on BOTH the tiny model
+        # and gemma-3-270M so both the f16 and q8_0 KV paths are covered.
+        tests: List[Dict[str, Any]] = [
+            {
+                "filename": "models/stories260Ktok512.gguf",
+                "canister_filename": "models/tiny.gguf",
+                "wasm_memory_limit": None,
+                "env": {"SMALL_MAXTOK_MODEL": "models/tiny.gguf"},
+                "test_paths": shared
+                + [
+                    "test/test_tiny_stories.py",
+                    # UTF-8 chunk-boundary regression: a Devanagari prompt split
+                    # at a byte-token boundary must still decode as Candid text.
+                    # Cheap enough to run here; the Qwen3 Hindi counterpart
+                    # (test_qwen3_hindi.py) is local-only, like the rest of Qwen.
+                    "test/test_tiny_stories_utf8.py",
+                    # after a model is loaded; exact token-accounting reconciliation.
+                    "test/test_token_counts.py",
+                    # small-max_tokens multi-call ingestion regression (f16 KV).
+                    "test/test_small_maxtokens.py",
+                    # Guards the two bug classes a llama.cpp upgrade re-introduces
+                    # (lost ICPP-PATCHes in main_.cpp). MUST stay last: it
+                    # reloads the model with a deliberately small --batch-size.
+                    "test/test_upgrade_regressions.py",
+                    # settings that must survive an upgrade (admin roles,
+                    # access level, cleanup timer): set here, checked after
+                    # the in-place upgrade below
+                    "test/test_upgrade_settings_before.py",
+                ],
+                "after_upgrade_test_paths": ["test/test_upgrade_settings_after.py"],
+            },
+            # gemma-3-270M (gemma3 / iSWA architecture, q8_0 KV): exercises the
+            # small-max_tokens prompt-cache regression on a real model. Requires the
+            # gemma gguf downloaded (see README-gemma-3.md) and the raised wasm
+            # memory limit. test_small_maxtokens loads the model itself.
+            {
+                "filename": "models/google/gemma-3-270m-it-GGUF/gemma-3-270m-it-Q8_0.gguf",  # pylint: disable=line-too-long
+                "canister_filename": "models/model.gguf",
+                "wasm_memory_limit": 4026531840,  # 3.75 GiB
+                "env": {
+                    "SMALL_MAXTOK_MODEL": "models/model.gguf",
+                    "SMALL_MAXTOK_KV": "q8_0",
+                    # bounded ctx/batch keep the compute+KV buffers small so
+                    # generation does not trip the local pocket-ic IC0502 flake.
+                    "SMALL_MAXTOK_CTX": "512",
+                    "SMALL_MAXTOK_BATCH": "64",
+                },
+                "test_paths": ["test/test_small_maxtokens.py"],
+            },
+            # funnAI prd regression (IC0502 heap-out-of-bounds, README-0003-...-
+            # IC0502.md). The fleet's own model (Qwen2.5-0.5B q8_0, loaded exactly
+            # as prd does: no ctx flags -> full 32768) replayed through the real
+            # Judge/ShareService/Challenger controller sequence with the real prd
+            # prompts. This is the ONLY test that reproduced the threadpool
+            # use-after-free: it needs the fleet model + realistic allocation
+            # churn + many reuse cycles, which the tiny/gemma iterations above do
+            # not provide, so they never caught it. MUST be re-run before shipping
+            # any llama.cpp upgrade (see README-contributors-guide.md).
+            #
+            # local_only: the full-ctx Qwen replay is too slow for the hosted
+            # GitHub runner (the Qwen models time out there). It runs on
+            # `make test-llm-wasm` locally. IC0502_REPRO_CYCLES sets the soak
+            # length (default 5, enough to catch this exact bug -- it trapped in
+            # cycle 0; raise to >=50 for a pre-release soak).
+            # Decision models (System One, run_decision): Julia-1 and Laya, see
+            # README-decision-models.md. DECISION_MODEL selects the per-model
+            # budget and reference answers in test/test_decision.py.
+            {
+                "filename": "models/ggml-org/Julia-1-GGUF/Julia-1-Q8_0.gguf",
+                "canister_filename": "models/model.gguf",
+                "wasm_memory_limit": 4026531840,  # 3.75 GiB
+                "env": {"DECISION_MODEL": "julia-1"},
+                "test_paths": ["test/test_decision.py"],
+            },
+            {
+                "filename": "models/ggml-org/Laya-GGUF/Laya-Q8_0.gguf",
+                "canister_filename": "models/model.gguf",
+                "wasm_memory_limit": 4026531840,  # 3.75 GiB
+                "topup": 50000000000000,  # 449 MB upload
+                "env": {"DECISION_MODEL": "laya"},
+                "test_paths": ["test/test_decision.py"],
+            },
+            {
+                "filename": "models/ggml-org/Kev-0.8B-GGUF/Kev-0.8B-Q8_0.gguf",
+                "canister_filename": "models/model.gguf",
+                "wasm_memory_limit": 4026531840,  # 3.75 GiB
+                "topup": 100000000000000,  # 812 MB upload
+                "env": {"DECISION_MODEL": "kev-0.8b"},
+                "test_paths": ["test/test_decision.py"],
+            },
+            {
+                "filename": "models/Qwen/Qwen2.5-0.5B-Instruct-GGUF/qwen2.5-0.5b-instruct-q8_0.gguf",  # pylint: disable=line-too-long
+                "canister_filename": "models/model.gguf",
+                "wasm_memory_limit": 4026531840,  # 3.75 GiB
+                "topup": 90000000000000,  # 675 MB upload + 32768-ctx load
+                "local_only": True,
+                "env": {},
+                "test_paths": ["test/test_ic0502_repro.py"],
+            },
+            # The Qwen models time out in the Github action; run them locally by
+            # uncommenting (schema: filename, canister_filename, wasm_memory_limit,
+            # env, test_paths). Qwen3-0.6B multi-turn is exercised by test_qwen3.py.
+            # {
+            #     "filename": "models/Qwen/Qwen3-0.6B-GGUF/Qwen3-0.6B-Q8_0.gguf",
+            #     "canister_filename": "models/model.gguf",
+            #     "wasm_memory_limit": 4026531840,
+            #     "env": {},
+            #     "test_paths": ["test/test_qwen3.py"],
+            # },
+        ]
+
+        for test in tests:
+            filename = test["filename"]
+            canister_filename = test["canister_filename"]
+            test_paths = test["test_paths"]
+            env_prefix = "".join(f"{k}={v} " for k, v in test.get("env", {}).items())
+
+            if test.get("local_only") and running_in_ci():
+                typer.echo(f"--\nSkipping {filename} (local_only, and running in CI)")
+                continue
+
+            typer.echo("--\nStop the local network")
+            icp_network_stop()
+
+            typer.echo("--\nStart a clean local network")
+            # icp-cli has no `--clean` flag. The clean-start equivalent is to
+            # remove the disposable cache (replica state + the managed network's
+            # id mappings) and start fresh. NEVER remove .icp/data — it holds the
+            # committed mainnet id mappings.
+            run_shell_cmd("rm -rf .icp/cache", cwd=ROOT_PATH)
+            run_shell_cmd("icp network start -d", cwd=ROOT_PATH)
+
+            typer.echo(f"--\nDeploy {ROOT_PATH.name}")
+            run_shell_cmd(f"icp deploy -e local -y{identity_arg}", cwd=ROOT_PATH)
+
+            # Top up cycles so loading a larger model can grow wasm memory
+            # (otherwise load_model traps with IC0532 insufficient-cycles).
+            # Local cycles come from a faucet, so a larger amount is free; bigger
+            # models (upload + wasm-memory growth at a large ctx) need more --
+            # override per entry with "topup". Default covers tiny + gemma.
+            topup = test.get("topup", 20000000000000)
+            typer.echo(f"--\nTop up cycles ({topup})")
+            run_shell_cmd(
+                f"icp canister top-up llama_cpp --amount {topup} -e local"
+                f"{identity_arg}",
+                cwd=ROOT_PATH,
+            )
+
+            if test.get("wasm_memory_limit"):
+                typer.echo(
+                    f"--\nRaise wasm memory limit to {test['wasm_memory_limit']}"
+                )
+                run_shell_cmd(
+                    "icp canister settings update llama_cpp "
+                    f"--wasm-memory-limit {test['wasm_memory_limit']} -e local"
+                    f"{identity_arg}",
+                    cwd=ROOT_PATH,
+                )
+
+            typer.echo(f"--\nUpload {filename}")
+            run_shell_cmd(
+                f" python -m scripts.upload --network local --canister llama_cpp "
+                f" --canister-filename {canister_filename} {filename}",
+                cwd=ROOT_PATH,
+            )
+
+            for test_path in test_paths:
+                typer.echo(f"--\nRun pytest on {test_path}")
+                run_shell_cmd(
+                    f"{env_prefix}pytest -vv --network=local "
+                    f"--identity={identity} {test_path}",
+                    cwd=ROOT_PATH,
+                )
+
+            after_upgrade = test.get("after_upgrade_test_paths", [])
+            if after_upgrade:
+                typer.echo(f"--\nUpgrade {ROOT_PATH.name} in place")
+                run_shell_cmd(
+                    f"icp deploy -e local -y --mode upgrade{identity_arg}",
+                    cwd=ROOT_PATH,
+                )
+            for test_path in after_upgrade:
+                typer.echo(f"--\nRun pytest on {test_path} (after the upgrade)")
+                run_shell_cmd(
+                    f"{env_prefix}pytest -vv --network=local "
+                    f"--identity={identity} {test_path}",
+                    cwd=ROOT_PATH,
+                )
+
+            typer.echo("--\nStop the local network")
+            icp_network_stop()
+
+    except subprocess.CalledProcessError as e:
+        typer.echo("--\nSomething did not pass")
+        icp_network_stop()
+        return e.returncode
+
+    typer.echo("--\nCongratulations, everything passed!")
+    try:
+        typer.echo("💯 🎉 🏁")
+    except UnicodeEncodeError:
+        typer.echo(" ")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
