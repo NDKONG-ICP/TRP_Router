@@ -10,6 +10,7 @@ type HttpResponse = record {
   headers : vec HeaderField;
   body : blob;
   streaming_strategy : opt null;
+  upgrade : opt bool;
 };
 
 type ProviderHealth = record {
@@ -30,7 +31,11 @@ type QuoteResult = variant { ok : nat; err : text };
 service : {
   init_router : (principal) -> (); // blob_store canister id
   set_llama_qwen25 : (principal) -> (); // llama_cpp_qwen25 canister id (M3)
+  set_http_transform : (principal) -> (); // legacy no-op
+  transform : (record { response : record { status : nat; headers : vec record { text; text }; body : blob }; context : blob }) -> (record { status : nat; headers : vec record { text; text }; body : blob }) query;
   set_provider_keys : (opt text, opt text, opt text) -> (); // cloudflare acct, cf token, gemini (admin)
+  set_chat_vault_keys : (opt text, opt text, opt text) -> (); // groq, openrouter, anthropic vault
+  set_byok_anthropic : (opt text) -> ();
   http_request_update : (HttpRequest) -> (HttpResponse);
   http_request : (HttpRequest) -> (HttpResponse) query;
   router_status : () -> (RouterStatus) query;

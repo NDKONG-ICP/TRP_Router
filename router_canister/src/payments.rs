@@ -8,6 +8,7 @@ use ic_stable_structures::{
 };
 use std::borrow::Cow;
 use std::cell::RefCell;
+use std::collections::HashMap;
 
 pub const PAYMENTS_ENABLED: bool = false;
 
@@ -89,6 +90,7 @@ thread_local! {
         RefCell::new(StableBTreeMap::init(
             MEMORY_MANAGER.with(|m| m.borrow().get(MemoryId::new(23))),
         ));
+    static ANTHROPIC_BYOK: RefCell<HashMap<Principal, String>> = RefCell::new(HashMap::new());
 }
 
 pub fn caller_credits(p: Principal) -> u128 {
@@ -182,6 +184,24 @@ pub fn set_byok(p: Principal, enabled: bool) {
 
 pub fn byok_active(p: Principal) -> bool {
     BYOK.with(|b| b.borrow().get(&p).map(|f| f.0 == 1).unwrap_or(false))
+}
+
+pub fn set_byok_anthropic(p: Principal, key: Option<String>) {
+    ANTHROPIC_BYOK.with(|m| {
+        let mut map = m.borrow_mut();
+        match key {
+            Some(k) if !k.is_empty() => {
+                map.insert(p, k);
+            }
+            _ => {
+                map.remove(&p);
+            }
+        }
+    });
+}
+
+pub fn byok_anthropic(p: Principal) -> Option<String> {
+    ANTHROPIC_BYOK.with(|m| m.borrow().get(&p).cloned())
 }
 
 pub fn holder_fee_bps(p: Principal) -> u16 {

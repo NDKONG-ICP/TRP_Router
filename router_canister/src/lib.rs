@@ -1,5 +1,7 @@
 mod blob_client;
+mod chat_providers;
 mod image_providers;
+mod models;
 mod moderation;
 mod onchain;
 mod payments;
@@ -27,6 +29,8 @@ pub struct HttpResponse {
     pub headers: Vec<HeaderField>,
     pub body: Vec<u8>,
     pub streaming_strategy: Option<()>,
+    /// When `true`, HTTP gateway invokes `http_request_update` with the same request.
+    pub upgrade: Option<bool>,
 }
 
 #[derive(CandidType, Deserialize, Clone, Debug)]
@@ -58,6 +62,9 @@ thread_local! {
     static CF_ACCT: RefCell<Option<String>> = RefCell::new(None);
     static CF_TOKEN: RefCell<Option<String>> = RefCell::new(None);
     static GEMINI_KEY: RefCell<Option<String>> = RefCell::new(None);
+    static GROQ_KEY: RefCell<Option<String>> = RefCell::new(None);
+    static OPENROUTER_KEY: RefCell<Option<String>> = RefCell::new(None);
+    static ANTHROPIC_VAULT: RefCell<Option<String>> = RefCell::new(None);
     static PROVIDER_ERRORS: RefCell<Vec<(String, String)>> = RefCell::new(Vec::new());
 }
 
@@ -70,11 +77,38 @@ fn json_response(status: u16, body: &str) -> HttpResponse {
         )],
         body: body.as_bytes().to_vec(),
         streaming_strategy: None,
+        upgrade: None,
     }
 }
 
-fn path_of(url: &str) -> &str {
-    url.split('?').next().unwrap_or(url)
+fn http_upgrade() -> HttpResponse {
+    HttpResponse {
+        status_code: 204,
+        headers: vec![],
+        body: vec![],
+        streaming_strategy: None,
+        upgrade: Some(true),
+    }
+}
+
+fn normalize_path(url: &str) -> String {
+    let mut path = url.split('?').next().unwrap_or(url).to_string();
+    if let Some(idx) = path.find("/v1/") {
+        path = path[idx..].to_string();
+    } else if let Some(idx) = path.find("/blob/") {
+        path = path[idx..].to_string();
+    }
+    if !path.starts_with('/') {
+        path = format!("/{path}");
+    }
+    path
+}
+
+fn is_post_upgrade_path(path: &str) -> bool {
+    matches!(
+        path,
+        "/v1/chat/completions" | "/v1/images/generations" | "/v1/images/edits"
+    )
 }
 
 #[derive(SerdeDeserialize)]
@@ -88,6 +122,7 @@ struct ImageGenBody {
 struct ChatBody {
     model: String,
     messages: Vec<ChatMsg>,
+    stream: Option<bool>,
 }
 
 #[derive(SerdeDeserialize)]
@@ -122,10 +157,32 @@ fn transform(raw: ic_cdk::api::management_canister::http_request::TransformArgs)
 
 #[update]
 fn set_provider_keys(cf_acct: Option<String>, cf_token: Option<String>, gemini: Option<String>) {
-    // Local vault: admin-only; never log values.
     CF_ACCT.with(|a| *a.borrow_mut() = cf_acct);
     CF_TOKEN.with(|t| *t.borrow_mut() = cf_token);
     GEMINI_KEY.with(|g| *g.borrow_mut() = gemini);
+}
+
+#[update]
+fn set_chat_vault_keys(groq: Option<String>, openrouter: Option<String>, anthropic: Option<String>) {
+    GROQ_KEY.with(|g| *g.borrow_mut() = groq);
+    OPENROUTER_KEY.with(|o| *o.borrow_mut() = openrouter);
+    ANTHROPIC_VAULT.with(|a| *a.borrow_mut() = anthropic);
+}
+
+#[update]
+fn set_byok_anthropic(key: Option<String>) {
+    payments::set_byok_anthropic(caller(), key);
+}
+
+fn chat_keys_for_caller() -> chat_providers::ChatKeys {
+    let p = caller();
+    chat_providers::ChatKeys {
+        cf_acct: CF_ACCT.with(|a| a.borrow().clone()),
+        cf_token: CF_TOKEN.with(|t| t.borrow().clone()),
+        groq: GROQ_KEY.with(|g| g.borrow().clone()),
+        openrouter: OPENROUTER_KEY.with(|o| o.borrow().clone()),
+        anthropic: payments::byok_anthropic(p).or_else(|| ANTHROPIC_VAULT.with(|a| a.borrow().clone())),
+    }
 }
 
 #[query]
@@ -143,7 +200,11 @@ fn router_status() -> RouterStatus {
     RouterStatus {
         providers: vec![
             mk("cloudflare-flux-schnell"),
+            mk("cloudflare-workers-ai"),
             mk("gemini-2.5-flash-image"),
+            mk("groq"),
+            mk("openrouter"),
+            mk("anthropic"),
             mk("pollinations-flux"),
         ],
         payments_enabled: PAYMENTS_ENABLED,
@@ -263,10 +324,10 @@ async fn handle_chat(body: &[u8]) -> HttpResponse {
         Err(e) => return json_response(400, &format!(r#"{{"error":"{e}"}}"#)),
     };
     if parsed.model.starts_with("trp/onchain-") {
-        if onchain::map_model(&parsed.model) != Some("qwen25") {
+        if onchain::map_model(&parsed.model).is_none() {
             return json_response(
                 503,
-                r#"{"error":"on-chain model not loaded locally (only trp/onchain-qwen-0.5b is wired)"}"#,
+                r#"{"error":"on-chain model not loaded or unknown id"}"#,
             );
         }
         let Some(llama) = LLAMA_QWEN25.with(|l| l.borrow().clone()) else {
@@ -286,23 +347,62 @@ async fn handle_chat(body: &[u8]) -> HttpResponse {
         let Some(user) = onchain::last_user_message(&msgs) else {
             return json_response(400, r#"{"error":"messages must include a user turn"}"#);
         };
-        let (text, calls) = match onchain::complete_qwen(llama, &user).await {
+        let (text, calls) = match onchain::complete_for_model(llama, &parsed.model, &user).await {
             Ok(v) => v,
             Err(e) => return json_response(502, &format!(r#"{{"error":"{e}"}}"#)),
         };
         if text.is_empty() {
             return json_response(502, r#"{"error":"empty on-chain completion"}"#);
         }
-        return sse_chat_response(&parsed.model, &text, calls);
+        if parsed.stream == Some(true) {
+            return sse_chat_response(&parsed.model, &text, calls, true);
+        }
+        return json_chat_response(&parsed.model, &text, true, Some(calls));
     }
-    let _ = parsed.messages;
-    json_response(
-        501,
-        r#"{"error":"off-chain chat outcalls staged for R2; use trp/onchain-* after onicai build"}"#,
-    )
+
+    let msgs: Vec<(String, String)> = parsed
+        .messages
+        .iter()
+        .map(|m| (m.role.clone(), m.content.clone()))
+        .collect();
+    let keys = chat_keys_for_caller();
+    match chat_providers::complete(&parsed.model, &msgs, &keys).await {
+        Ok(text) => {
+            if parsed.stream == Some(true) {
+                return sse_chat_response(&parsed.model, &text, 0, false);
+            }
+            json_chat_response(&parsed.model, &text, false, None)
+        }
+        Err(e) => {
+            let code = if e.contains("BYOK required") { 402 } else { 502 };
+            json_response(code, &format!(r#"{{"error":{}}}"#, serde_json::json!(e)))
+        }
+    }
 }
 
-fn sse_chat_response(model: &str, content: &str, update_calls: u32) -> HttpResponse {
+fn json_chat_response(model: &str, content: &str, on_chain: bool, update_calls: Option<u32>) -> HttpResponse {
+    let escaped = serde_json::to_string(content).unwrap_or_else(|_| "\"\"".into());
+    let mut body = format!(
+        r#"{{"id":"trp-chat","object":"chat.completion","model":"{model}","choices":[{{"index":0,"message":{{"role":"assistant","content":{escaped}}},"finish_reason":"stop"}}]"#
+    );
+    if let Some(c) = update_calls {
+        body.push_str(&format!(r#","on_chain_update_calls":{c}"#));
+    }
+    body.push('}');
+    let mut headers = vec![HeaderField("Content-Type".into(), "application/json".into())];
+    if on_chain {
+        headers.push(HeaderField("X-TRP-On-Chain".into(), "true".into()));
+    }
+    HttpResponse {
+        status_code: 200,
+        headers,
+        body: body.into_bytes(),
+        streaming_strategy: None,
+        upgrade: None,
+    }
+}
+
+fn sse_chat_response(model: &str, content: &str, update_calls: u32, on_chain: bool) -> HttpResponse {
     let escaped: String = content
         .chars()
         .flat_map(|c| match c {
@@ -316,26 +416,24 @@ fn sse_chat_response(model: &str, content: &str, update_calls: u32) -> HttpRespo
         r#"data: {{"id":"trp-onchain","object":"chat.completion.chunk","model":"{model}","choices":[{{"index":0,"delta":{{"content":"{escaped}"}},"finish_reason":null}}],"on_chain_update_calls":{update_calls}}}"#,
     );
     let body = format!("{chunk}\n\ndata: [DONE]\n\n");
+    let mut headers = vec![
+        HeaderField("Content-Type".into(), "text/event-stream".into()),
+        HeaderField("Cache-Control".into(), "no-cache".into()),
+    ];
+    if on_chain {
+        headers.push(HeaderField("X-TRP-On-Chain".into(), "true".into()));
+    }
     HttpResponse {
         status_code: 200,
-        headers: vec![
-            HeaderField("Content-Type".into(), "text/event-stream".into()),
-            HeaderField("Cache-Control".into(), "no-cache".into()),
-            HeaderField("X-TRP-On-Chain".into(), "true".into()),
-        ],
+        headers,
         body: body.into_bytes(),
         streaming_strategy: None,
+        upgrade: None,
     }
 }
 
 fn handle_models() -> HttpResponse {
-    let body = r#"{"data":[
-      {"id":"trp/image-standard","object":"model","owned_by":"trp-router"},
-      {"id":"trp/image-identity","object":"model","owned_by":"trp-router"},
-      {"id":"trp/onchain-qwen-0.5b","object":"model","owned_by":"trp-router","on_chain":true},
-      {"id":"trp/onchain-llama-3.2-1b","object":"model","owned_by":"trp-router","on_chain":true}
-    ]}"#;
-    json_response(200, body)
+    json_response(200, &models::models_json())
 }
 
 fn handle_status() -> HttpResponse {
@@ -361,9 +459,9 @@ fn handle_status() -> HttpResponse {
 
 #[update]
 async fn http_request_update(req: HttpRequest) -> HttpResponse {
-    let path = path_of(&req.url);
+    let path = normalize_path(&req.url);
     if req.method.eq_ignore_ascii_case("POST") {
-        match path {
+        match path.as_str() {
             "/v1/images/generations" => return handle_images_generations(&req.body).await,
             "/v1/images/edits" => {
                 return json_response(
@@ -380,21 +478,41 @@ async fn http_request_update(req: HttpRequest) -> HttpResponse {
 
 #[query]
 fn http_request(req: HttpRequest) -> HttpResponse {
-    let path = path_of(&req.url);
-    match path {
+    let path = normalize_path(&req.url);
+    if req.method.eq_ignore_ascii_case("POST") && is_post_upgrade_path(&path) {
+        return http_upgrade();
+    }
+    if req.method.eq_ignore_ascii_case("OPTIONS") {
+        return HttpResponse {
+            status_code: 204,
+            headers: vec![
+                HeaderField("Access-Control-Allow-Origin".into(), "*".into()),
+                HeaderField(
+                    "Access-Control-Allow-Methods".into(),
+                    "GET, POST, OPTIONS".into(),
+                ),
+                HeaderField(
+                    "Access-Control-Allow-Headers".into(),
+                    "Content-Type, Authorization, X-TRP-On-Chain".into(),
+                ),
+            ],
+            body: vec![],
+            streaming_strategy: None,
+            upgrade: None,
+        };
+    }
+    match path.as_str() {
         "/v1/models" => handle_models(),
         "/v1/status" => handle_status(),
         p if p.starts_with("/blob/") => HttpResponse {
             status_code: 307,
             headers: vec![HeaderField(
                 "Location".into(),
-                format!(
-                    "/blob/{}",
-                    p.trim_start_matches("/blob/")
-                ),
+                format!("/blob/{}", p.trim_start_matches("/blob/")),
             )],
             body: vec![],
             streaming_strategy: None,
+            upgrade: None,
         },
         _ => json_response(404, r#"{"error":"not found"}"#),
     }

@@ -54,6 +54,14 @@ async fn outcall_get(url: String) -> Result<Vec<u8>, String> {
     Ok(resp.body)
 }
 
+pub async fn http_post_json(
+    url: String,
+    headers: Vec<HttpHeader>,
+    body: Vec<u8>,
+) -> Result<Vec<u8>, String> {
+    outcall_post_json(url, headers, body).await
+}
+
 async fn outcall_post_json(url: String, headers: Vec<HttpHeader>, body: Vec<u8>) -> Result<Vec<u8>, String> {
     let arg = CanisterHttpRequestArgument {
         url,

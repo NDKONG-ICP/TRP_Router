@@ -41,12 +41,22 @@ const BASE_ARGS: &[&str] = &[
     "-sp",
 ];
 
-/// Qwen2.5 chat template (matches onicai test_qwen2.py fixtures).
-fn qwen_prompt(user: &str) -> String {
+fn chat_prompt(system: &str, user: &str) -> String {
     format!(
-        "<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n<|im_start|>user\n{}<|im_end|>\n<|im_start|>assistant\n",
+        "<|im_start|>system\n{system}<|im_end|>\n<|im_start|>user\n{}<|im_end|>\n<|im_start|>assistant\n",
         user.trim()
     )
+}
+
+/// Qwen2.5 chat template (matches onicai test_qwen2.py fixtures).
+fn qwen_prompt(user: &str) -> String {
+    chat_prompt("You are a helpful assistant.", user)
+}
+
+const RAVEN_SYSTEM: &str = "You are the TRP Raven — a witty, concise on-chain guide for the RAVEN Project ecosystem (DRAFT persona). Speak in short paragraphs. Never discuss token prices, yields, or investment advice.";
+
+fn raven_prompt(user: &str) -> String {
+    chat_prompt(RAVEN_SYSTEM, user)
 }
 
 const STOP_MARKERS: &[&str] = &[
@@ -84,7 +94,10 @@ async fn run_update(llama: Principal, args: Vec<String>) -> Result<RunOutputReco
     }
 }
 
-pub async fn complete_qwen(llama: Principal, user_message: &str) -> Result<(String, u32), String> {
+async fn complete_with_prompt(
+    llama: Principal,
+    initial_prompt: String,
+) -> Result<(String, u32), String> {
     let (new_chat_res,): (OutputRecordResult,) = ic_cdk::call(
         llama,
         "new_chat",
@@ -105,7 +118,7 @@ pub async fn complete_qwen(llama: Principal, user_message: &str) -> Result<(Stri
 
     let mut calls = 0u32;
     let mut output = String::new();
-    let mut ingest = qwen_prompt(user_message);
+    let mut ingest = initial_prompt;
 
     while !ingest.is_empty() {
         calls += 1;
@@ -162,9 +175,26 @@ pub async fn complete_qwen(llama: Principal, user_message: &str) -> Result<(Stri
     Ok((sanitize_completion(&output), calls))
 }
 
+pub async fn complete_qwen(llama: Principal, user_message: &str) -> Result<(String, u32), String> {
+    complete_with_prompt(llama, qwen_prompt(user_message)).await
+}
+
+pub async fn complete_for_model(
+    llama: Principal,
+    model: &str,
+    user_message: &str,
+) -> Result<(String, u32), String> {
+    let prompt = match model {
+        "trp/onchain-qwen-0.5b" => qwen_prompt(user_message),
+        "trp/onchain-raven-chat" => raven_prompt(user_message),
+        _ => return Err(format!("unsupported on-chain model: {model}")),
+    };
+    complete_with_prompt(llama, prompt).await
+}
+
 pub fn map_model(model: &str) -> Option<&'static str> {
     match model {
-        "trp/onchain-qwen-0.5b" => Some("qwen25"),
+        "trp/onchain-qwen-0.5b" | "trp/onchain-raven-chat" => Some("qwen25"),
         _ if model.starts_with("trp/onchain-") => None,
         _ => None,
     }
