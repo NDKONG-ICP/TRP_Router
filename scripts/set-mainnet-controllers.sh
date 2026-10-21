@@ -10,7 +10,7 @@ CONTROLLERS=(
   "in4fs-lkdc6-2qxlg-c6woz-z5yqw-6hdwo-cnlym-qny2v-fjttc-e52da-lqe"
   "gqkko-43bbx-nwsp4-it2rg-pc2dy-w2pt2-fa5om-4y6es-oyhz2-5i5oh-5ae"
 )
-for c in blob_store router_canister llama_cpp_qwen25; do
+for c in blob_store router_canister http_transform llama_cpp_qwen25; do
   if dfx canister id "$c" --network "$NET" >/dev/null 2>&1; then
     echo "=== controllers: $c ==="
     args=(--network "$NET")

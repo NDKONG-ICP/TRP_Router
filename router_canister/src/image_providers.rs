@@ -1,8 +1,13 @@
 use ic_cdk::api::management_canister::http_request::{
-    http_request, CanisterHttpRequestArgument, HttpHeader, HttpMethod,
+    http_request, CanisterHttpRequestArgument, HttpHeader, HttpMethod, TransformContext,
 };
 
 const TIMEOUT_NS: u128 = 30_000_000_000;
+
+fn transform_ctx() -> TransformContext {
+    // Transform must live on this canister (IC rejects external transform principal).
+    TransformContext::from_name("transform".to_string(), vec![])
+}
 
 pub struct ProviderKeys {
     pub cf_acct: Option<String>,
@@ -30,7 +35,7 @@ async fn outcall_get(url: String) -> Result<Vec<u8>, String> {
         ],
         body: None,
         max_response_bytes: Some(2_000_000),
-        transform: None,
+        transform: Some(transform_ctx()),
     };
     let (resp,) = http_request(arg, TIMEOUT_NS)
         .await
@@ -56,7 +61,7 @@ async fn outcall_post_json(url: String, headers: Vec<HttpHeader>, body: Vec<u8>)
         headers,
         body: Some(body),
         max_response_bytes: Some(2_000_000),
-        transform: None,
+        transform: Some(transform_ctx()),
     };
     let (resp,) = http_request(arg, TIMEOUT_NS)
         .await
@@ -160,23 +165,22 @@ async fn gemini(prompt: &str, keys: &ProviderKeys) -> Result<Vec<u8>, String> {
 
 async fn pollinations(prompt: &str) -> Result<Vec<u8>, String> {
     let encoded: String = urlencoding(prompt);
-    let mut last = String::new();
-    for attempt in 0..4u64 {
-        let seed = time_seed().wrapping_add(attempt.wrapping_mul(7919));
-        let url = format!(
-            "https://image.pollinations.ai/prompt/{encoded}?width=1024&height=1024&nologo=true&model=flux&seed={seed}"
-        );
-        match outcall_get(url).await {
-            Ok(body) if body.len() >= 500 => return Ok(body),
-            Ok(body) => last = format!("pollinations short body len={}", body.len()),
-            Err(e) => last = e,
-        }
+    // Deterministic seed so all subnet replicas request the same image (consensus).
+    let seed = prompt_seed(prompt);
+    let url = format!(
+        "https://image.pollinations.ai/prompt/{encoded}?width=1024&height=1024&nologo=true&model=flux&seed={seed}"
+    );
+    match outcall_get(url).await {
+        Ok(body) if body.len() >= 500 => Ok(body),
+        Ok(body) => Err(format!("pollinations short body len={}", body.len())),
+        Err(e) => Err(e),
     }
-    Err(if last.is_empty() {
-        "pollinations failed".into()
-    } else {
-        last
-    })
+}
+
+fn prompt_seed(prompt: &str) -> u64 {
+    use sha2::{Digest, Sha256};
+    let h = Sha256::digest(prompt.as_bytes());
+    u64::from_be_bytes(h[..8].try_into().expect("8 bytes"))
 }
 
 fn urlencoding(s: &str) -> String {
@@ -190,10 +194,6 @@ fn urlencoding(s: &str) -> String {
         }
     }
     out
-}
-
-fn time_seed() -> u64 {
-    ic_cdk::api::time() / 1_000_000
 }
 
 pub async fn generate_with_failover(

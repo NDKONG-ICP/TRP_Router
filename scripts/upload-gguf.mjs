@@ -20,8 +20,13 @@ const modelPath =
   process.argv[2] ||
   join(root, "tmp/models/Qwen/Qwen2.5-0.5B-Instruct-GGUF/qwen2.5-0.5b-instruct-q8_0.gguf");
 
+const NET = process.env.DFX_NETWORK || "local";
 const dfx = (cmd) =>
-  execSync(`dfx ${cmd}`, { cwd: root, encoding: "utf8", env: { ...process.env, NO_COLOR: "1" } }).trim();
+  execSync(`dfx ${cmd} --network ${NET}`, {
+    cwd: root,
+    encoding: "utf8",
+    env: { ...process.env, NO_COLOR: "1" },
+  }).trim();
 
 const bytes = readFileSync(modelPath);
 const hash = createHash("sha256").update(bytes).digest("hex");
@@ -38,10 +43,13 @@ const pem = execSync(`dfx identity export ${whoami}`, {
   env: { ...process.env, NO_COLOR: "1" },
 });
 const identity = Secp256k1KeyIdentity.fromPem(pem);
-const host = process.env.DFX_HOST || "http://127.0.0.1:8000";
+const host =
+  process.env.DFX_HOST || (NET === "ic" ? "https://icp0.io" : "http://127.0.0.1:8000");
 const agent = new HttpAgent({ host, identity });
-console.log("upload identity", whoami);
-await agent.fetchRootKey();
+console.log("upload identity", whoami, "network", NET, "host", host);
+if (NET !== "ic") {
+  await agent.fetchRootKey();
+}
 const llama = Actor.createActor(idlFactory, { agent, canisterId });
 
 const health = await llama.health();

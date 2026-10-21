@@ -2,6 +2,12 @@
   "blob_store": {
     "ic": "5y35h-dyaaa-aaaao-bbqua-cai"
   },
+  "http_transform": {
+    "ic": "5wzqp-yiaaa-aaaao-bbqva-cai"
+  },
+  "llama_cpp_qwen25": {
+    "ic": "5ryw3-vqaaa-aaaao-bbqvq-cai"
+  },
   "router_canister": {
     "ic": "5723t-oaaaa-aaaao-bbquq-cai"
   }

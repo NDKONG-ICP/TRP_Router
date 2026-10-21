@@ -11,7 +11,12 @@
       "type": "rust",
       "package": "router_canister",
       "candid": "router_canister.did",
-      "dependencies": ["blob_store"]
+      "dependencies": ["blob_store", "http_transform"]
+    },
+    "http_transform": {
+      "type": "rust",
+      "package": "http_transform",
+      "candid": "http_transform.did"
     },
     "mock_trp_ledger": {
       "type": "rust",

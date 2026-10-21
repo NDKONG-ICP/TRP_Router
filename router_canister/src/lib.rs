@@ -107,6 +107,20 @@ fn set_llama_qwen25(llama: Principal) {
 }
 
 #[update]
+fn set_http_transform(_transform: Principal) {
+    // Legacy no-op: transform is implemented on this canister as `transform` query.
+}
+
+#[query]
+fn transform(raw: ic_cdk::api::management_canister::http_request::TransformArgs) -> ic_cdk::api::management_canister::http_request::HttpResponse {
+    ic_cdk::api::management_canister::http_request::HttpResponse {
+        status: raw.response.status,
+        body: raw.response.body,
+        headers: vec![],
+    }
+}
+
+#[update]
 fn set_provider_keys(cf_acct: Option<String>, cf_token: Option<String>, gemini: Option<String>) {
     // Local vault: admin-only; never log values.
     CF_ACCT.with(|a| *a.borrow_mut() = cf_acct);
