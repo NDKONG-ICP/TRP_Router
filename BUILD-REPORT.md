@@ -56,11 +56,29 @@ curl -sS -X POST "https://5723t-oaaaa-aaaao-bbquq-cai.raw.icp0.io/v1/chat/comple
 
 ### Cloudflare LLM
 
+**InferCoordinator fix (2026-10-22):** 120s TTL (memory + DO storage), in-flight promise before upstream, identical serialized JSON for all waiters/stragglers.
+
+**10 consecutive public curls** — `trp/cf/@cf/meta/llama-3.2-1b-instruct` (2026-10-22, all HTTP 200, **0** consensus failures):
+
 ```bash
-curl -sS -X POST "https://5723t-oaaaa-aaaao-bbquq-cai.raw.icp0.io/v1/chat/completions" \
-  -H "Content-Type: application/json" \
-  -d '{"model":"trp/cf/@cf/meta/llama-3.2-1b-instruct","stream":false,"messages":[{"role":"user","content":"Reply with exactly: cf-ok"}]}'
+BASE="https://5723t-oaaaa-aaaao-bbquq-cai.raw.icp0.io/v1"
+for i in $(seq 1 10); do
+  curl -sS -X POST "${BASE}/chat/completions" -H "Content-Type: application/json" \
+    -d "{\"model\":\"trp/cf/@cf/meta/llama-3.2-1b-instruct\",\"stream\":false,\"messages\":[{\"role\":\"user\",\"content\":\"Reply with exactly: run-${i}\"}]}"
+done
 ```
+
+| Run | Outcome |
+|-----|---------|
+| 1–6 | OK (`choices` present, assistant content returned) |
+| 7 | OK (`content`: `lala`) |
+| 8 | OK (`content`: `Run`) |
+| 9 | OK (`content`: `run`) |
+| 10 | OK (`content`: `Run.`) |
+
+**`trp/cf/@cf/meta/llama-3.1-8b-instruct`:** **not** in `/v1/models` (intentionally omitted). Direct curl → `{"error":"unknown or unsupported chat model: trp/cf/@cf/meta/llama-3.1-8b-instruct"}` — not advertised as callable.
+
+Example single-shot:
 
 ```json
 {"id":"trp-chat","object":"chat.completion","model":"trp/cf/@cf/meta/llama-3.2-1b-instruct","choices":[{"index":0,"message":{"role":"assistant","content":"I'm ready to respond."},"finish_reason":"stop"}]}
