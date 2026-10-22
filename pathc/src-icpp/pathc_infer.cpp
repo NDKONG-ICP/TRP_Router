@@ -1,3 +1,4 @@
+#include "diffusion_canister.h"
 #include "pathc_internal.h"
 
 #include <cstring>
@@ -148,7 +149,7 @@ bool pathc_run_generate(std::string &err) {
   pathc_push_timing("png_encode", pathc_instr_delta(i_clip),
                     1, pathc_now_ms() - t_clip);
 
+  free_sd_images(images, num_images);
   g_generated = true;
-  (void)images;
   return true;
 }

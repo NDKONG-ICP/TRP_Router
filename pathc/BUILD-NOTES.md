@@ -1,76 +1,50 @@
 # Path C PoC — build notes (honest staging)
 
 **Branch:** `pathc/poc`  
-**Updated:** 2026-10-22 (Phase A icpp push)  
-**Verdict:** **C2 wasm LINKS (2026-10-22)** — `build/diffusion_canister.wasm` ~36 MB via `scripts/build-icpp.sh`. **No on-chain image yet** (inference + deploy not wired).
+**Updated:** 2026-10-22 (C2 link + deploy)  
+**Verdict:** **C2 wasm LINKS** — `build/diffusion_canister.wasm` ~36 MB. **Local icpp canister deployed** (`dfx deploy` from `pathc/`). **On-chain image:** pending GGUF upload + first `generate_image` run.
 
-## Tonight: Phase A (icpp / WASI)
+## Phase A / C2 (icpp / WASI)
 
 ### What works
 
 | Item | Status |
 |------|--------|
-| **Space-free build root** | `pathc/scripts/build-icpp.sh` rsyncs to `/tmp/trp-pathc-nospace` (required — icpp breaks on `Raven DAPP` paths) |
+| **once_flag / libc++** | Universal `-include wasi-shims/icp_preamble.h` via `scripts/gen-icpp-config.py` on `cpp_compile_flags` + `cpp_compile_flags_defaults` (icpp runtime TUs). Clean rebuild clears `build-library/`. |
+| **Space-free build root** | `pathc/scripts/build-icpp.sh` → `/tmp/trp-pathc-nospace` |
 | **icpp recipe** | `pathc/icpp.toml` — sd.cpp + ggml CPU + onig + utf8proc + zip |
-| **WASI shims** | `pathc/wasi-shims/` copied/adapted from onicai (mutex, thread, future, condition_variable) |
-| **Compile progress** | **~50+ translation units** produce `.o` under `build/` (ggml ops, pipeline, model_io, tokenizers, etc.) |
-| **Host C3/C5** | SD-Turbo q8_0 + TAESD; `tmp/reference-cpu-0.png`; timings in `BENCHMARKS.md` |
-| **Rust scaffold** | `diffusion_canister` deploys locally; returns explicit C2 error until C++ wasm is wired |
+| **WASI shims** | `pathc/wasi-shims/` (mutex, thread, future, condition_variable, `icp_preamble.h`) |
+| **Candid exports** | `src-icpp/diffusion_canister.h` — `WASM_SYMBOL_EXPORTED("canister_query …")` / `canister_update …` |
+| **Host C3** | SD-Turbo q8_0 + TAESD; `tmp/reference-cpu-0.png`; timings in `BENCHMARKS.md` |
+| **Deploy** | `pathc/dfx.json` custom canister → `build/diffusion_canister.wasm` |
 
-### Vendor patches (sd.cpp @ `a77d362…`, document for re-apply)
+### Vendor patches (sd.cpp @ `a77d362…`)
 
-Applied under `pathc/vendor/stable-diffusion.cpp/`:
+See `patches/vendor-icp.md` (not committed: full `vendor/stable-diffusion.cpp/` tree).
 
-1. **`src/model_manager.cpp`** — lambda `available_device_bytes` explicit `-> size_t`; ternary uses `size_t{0}`.
-2. **`src/model_io/safetensors_io.cpp`** — WASI: `.string()` instead of `.u8string()` for shard paths.
-3. **`src/model_loader.cpp`** — `#ifdef __wasi__`: force `n_threads = 1`.
-4. **`wasi-shims/thread`** — `std::thread` runs worker inline (no trap); `sleep_for` + include `once_flag` before `<chrono>`.
-5. **`wasi-shims/mutex`** — `unique_lock(m, try_to_lock_t)`.
-6. **`icpp.toml` flags** — `-DGGML_MAX_NAME=160`, `-D_WASI_EMULATED_MMAN`, link `-lwasi-emulated-mman`, onig `config.h` from `thirdparty-wasi/oniguruma/`.
+### Upload
 
-### Remaining C2 blocker (exact)
+- **Do not** use `dfx canister call` with megabyte `vec { … }` (argv limit). Use `node pathc/scripts/upload_model.mjs` (`@dfinity/agent`, 1.9 MB chunks, host `dfx info webserver-port` → 4943).
 
-**Single compile error** (blocks link → no `build/diffusion_canister.wasm`):
+### Phase B–E (in progress)
 
-```text
-wasi-sysroot/.../c++/v1/__locale:131:3: error: unknown type name 'once_flag'
-```
-
-Triggered when libc++ `<chrono>` / locale headers load **before** our `wasi-shims/__mutex/once_flag.h` is visible (icpp runtime TUs + some sd includes). onicai avoids this by include order in llama sources; sd.cpp pulls `<chrono>` / iostream paths more aggressively.
-
-**Fix direction:** Extend wasi-shims (e.g. lightweight `<locale>` guard or universal preamble that icpp applies to **all** TUs including icpp-pro runtime — may need icpp-local `-include` with absolute path in `build-icpp.sh`), matching onicai upgrade 0003 notes in `llama_cpp_canister/icpp.toml`.
-
-### Superseded blockers
-
-- ~~cmake `find_package(Threads)` on WASI~~ — bypassed by **icpp** (not cmake) for IC target.
-- ~~No icpp recipe~~ — **draft recipe exists** (`pathc/icpp.toml`).
-
-### Phase B–E (not started)
-
-- Link wasm → deploy as `custom` canister (replace or merge Rust API).
-- Stable-memory GGUF load (mirror onicai `file_upload_chunk` + virtual FS / `gguf_init_from_buffer`).
-- `begin` / `step` / `finish` with TAESD, `--rng cpu`, 128×128 or 64×64, chunked update calls.
-- `pathc/tmp/onchain-0.png`, full `BENCHMARKS.md` on-chain table, determinism.
+- Chunked GGUF → VFS `model.gguf` / `taesd.safetensors` (`upload_*_chunk`).
+- `begin` / `step` / `finish` → `generate_image` (CPU RNG, 128×128 default).
+- `pathc/tmp/onchain-0.png`, `BENCHMARKS.md` on-chain table, determinism.
 
 ## Build commands
 
 ```bash
-# Host reference (unchanged)
-cd pathc && ./scripts/host_reference.sh
-
-# IC WASM (space-free)
 pathc/scripts/build-icpp.sh
-# artifacts: /tmp/trp-pathc-nospace/build/*.o ; wasm when link succeeds
+cd pathc && dfx deploy diffusion_canister --network local -y
+node ../pathc/scripts/upload_model.mjs   # from trp-router (node_modules)
+node ../pathc/scripts/onchain_generate.mjs
 ```
 
 ## GO / NO-GO
 
 | Milestone | Verdict |
 |-----------|---------|
-| **M2 optimize** | **NO-GO** — no linked wasm, no on-chain step timings |
-| **M3 shard** | **NO-GO** — nothing to shard |
-| **Feasibility** | **YES** — icpp path is real; compile surface mostly clears; one libc++/shim interaction left |
-
-## Local dfx
-
-Replica works after stale `network-id` backup. Rust `diffusion_canister` id (local): see last `dfx deploy` in your session.
+| **C2 link** | **GO** — wasm links, deploys, `status` query OK |
+| **M2 on-chain image** | **PENDING** — upload + inference |
+| **M3 shard** | **NO-GO** — out of scope for PoC |

@@ -1,3 +1,4 @@
+#include "diffusion_canister.h"
 #include "pathc_internal.h"
 
 #include <string>
@@ -44,7 +45,8 @@ void begin() {
   g_png.clear();
   g_timings.clear();
 
-  ic_api.to_wire(CandidTypeVariant{"ok", CandidTypeNat64{0}});
+  uint64_t session_id = 0;
+  ic_api.to_wire(CandidTypeVariant{"ok", CandidTypeNat64{session_id}});
 }
 
 void step() {

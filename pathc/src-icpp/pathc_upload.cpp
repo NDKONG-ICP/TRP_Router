@@ -1,3 +1,4 @@
+#include "diffusion_canister.h"
 #include "pathc_internal.h"
 
 #include <fstream>

@@ -14,7 +14,7 @@
 | **TAESD SHA-256** | `db169d69145ec4ff064e49d99c95fa05d3eb04ee453de35824a6d0f325513549` |
 | **Reference** | `trp-router/vendor/llama_cpp_canister` + upstream clone `onicai/llama_cpp_canister` @ main (icpp.toml template) |
 | **Path C icpp** | `pathc/icpp.toml`, `pathc/wasi-shims/`, `pathc/scripts/build-icpp.sh` |
-| **icpp wasm (local build)** | `00eb8e0f0f6cfb5001cb4c20a4db95ea05eff557f2517a322c64b9652fe1a163` (~36 MB, `/tmp/trp-pathc-nospace/build/diffusion_canister.wasm`) |
+| **icpp wasm (local build)** | `36bde7593d5382e585fb0dc8abe35fbf580ffc2a8e3b8463eadeb92c047c3247` (~36 MB, `pathc/build/diffusion_canister.wasm`, inference + Candid exports) |
 | **Onig config (WASI)** | copied from native build → `pathc/thirdparty-wasi/oniguruma/config.h` |
 
 Update when icpp link succeeds or the model pin changes.
