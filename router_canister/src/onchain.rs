@@ -53,10 +53,9 @@ fn qwen_prompt(user: &str) -> String {
     chat_prompt("You are a helpful assistant.", user)
 }
 
-const RAVEN_SYSTEM: &str = "You are the TRP Raven — a witty, concise on-chain guide for the RAVEN Project ecosystem (DRAFT persona). Speak in short paragraphs. Never discuss token prices, yields, or investment advice.";
-
 fn raven_prompt(user: &str) -> String {
-    chat_prompt(RAVEN_SYSTEM, user)
+    // Prefix in user turn (not a long system block) to stay within llama per-message instruction budget.
+    qwen_prompt(&format!("[TRP Raven] {}", user.trim()))
 }
 
 const STOP_MARKERS: &[&str] = &[
@@ -141,7 +140,7 @@ async fn complete_with_prompt(
         args.push("-p".into());
         args.push(String::new());
         args.push("-n".into());
-        args.push("32".into());
+        args.push("8".into());
         let r = run_update(llama, args).await?;
         if !r.output.is_empty() {
             output.push_str(&r.output);

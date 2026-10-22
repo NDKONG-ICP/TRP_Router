@@ -1,10 +1,12 @@
 mod blob_client;
 mod chat_providers;
 mod image_providers;
+mod mcp;
 mod models;
 mod moderation;
 mod onchain;
 mod payments;
+mod raven_art;
 
 use candid::{CandidType, Deserialize, Principal};
 use ic_cdk::{api::time, caller, query, update};
@@ -107,7 +109,7 @@ fn normalize_path(url: &str) -> String {
 fn is_post_upgrade_path(path: &str) -> bool {
     matches!(
         path,
-        "/v1/chat/completions" | "/v1/images/generations" | "/v1/images/edits"
+        "/v1/chat/completions" | "/v1/images/generations" | "/v1/images/edits" | "/mcp"
     )
 }
 
@@ -281,6 +283,13 @@ async fn handle_images_generations(body: &[u8]) -> HttpResponse {
         Ok(v) => v,
         Err(e) => return json_response(400, &format!(r#"{{"error":"invalid json: {e}"}}"#)),
     };
+    if parsed.model.as_deref() == Some("trp/onchain-raven-art") {
+        if let Err(e) = moderation::check_prompt(caller(), &parsed.prompt) {
+            return json_response(400, &format!(r#"{{"error":"{e}"}}"#));
+        }
+        let bytes = raven_art::compose_png(&parsed.prompt, None);
+        return store_image_blob(bytes, "raven-onchain-compositor").await;
+    }
     if let Err(e) = moderation::check_prompt(caller(), &parsed.prompt) {
         return json_response(400, &format!(r#"{{"error":"{e}"}}"#));
     }
@@ -297,6 +306,10 @@ async fn handle_images_generations(body: &[u8]) -> HttpResponse {
             return json_response(503, &format!(r#"{{"error":"{e}"}}"#));
         }
     };
+    store_image_blob(bytes, &provider).await
+}
+
+async fn store_image_blob(bytes: Vec<u8>, provider: &str) -> HttpResponse {
     let blob_store = BLOB_STORE.with(|b| b.borrow().clone());
     let Some(blob_store) = blob_store else {
         return json_response(500, r#"{"error":"blob_store not configured"}"#.into());
@@ -316,6 +329,76 @@ async fn handle_images_generations(body: &[u8]) -> HttpResponse {
         time()
     );
     json_response(200, &body)
+}
+
+async fn handle_mcp(body: &[u8]) -> HttpResponse {
+    let id = serde_json::from_slice::<serde_json::Value>(body)
+        .ok()
+        .and_then(|v| v.get("id").cloned())
+        .unwrap_or(serde_json::json!(null));
+    let (method, params) = match mcp::parse_request(body) {
+        Ok(v) => v,
+        Err(e) => return json_response(400, &mcp::err_response(id, &e)),
+    };
+    match method.as_str() {
+        "tools/list" => {
+            let body = mcp::ok_response(id, mcp::tools_list());
+            json_response(200, &body)
+        }
+        "tools/call" => {
+            let name = params
+                .get("name")
+                .and_then(|n| n.as_str())
+                .unwrap_or("");
+            let args = params.get("arguments").cloned().unwrap_or_default();
+            match name {
+                "list_models" => {
+                    let models: serde_json::Value =
+                        serde_json::from_str(&models::models_json()).unwrap_or(serde_json::json!({}));
+                    json_response(200, &mcp::ok_response(id, models))
+                }
+                "chat" => {
+                    let payload = serde_json::json!({
+                        "model": args.get("model").and_then(|v| v.as_str()).unwrap_or("trp/onchain-qwen-0.5b"),
+                        "stream": args.get("stream").and_then(|v| v.as_bool()).unwrap_or(false),
+                        "messages": args.get("messages").cloned().unwrap_or_default(),
+                    });
+                    let inner = handle_chat(serde_json::to_vec(&payload).unwrap_or_default().as_slice()).await;
+                    if inner.status_code != 200 {
+                        return inner;
+                    }
+                    let parsed: serde_json::Value =
+                        serde_json::from_slice(&inner.body).unwrap_or(serde_json::json!({}));
+                    json_response(200, &mcp::ok_response(id, parsed))
+                }
+                "generate_image" | "onchain_raven_art" => {
+                    let model = if name == "onchain_raven_art" {
+                        "trp/onchain-raven-art"
+                    } else {
+                        args.get("model")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("trp/image-standard")
+                    };
+                    let payload = serde_json::json!({
+                        "model": model,
+                        "prompt": args.get("prompt").and_then(|v| v.as_str()).unwrap_or("raven"),
+                        "size": args.get("size").and_then(|v| v.as_str()),
+                    });
+                    let inner =
+                        handle_images_generations(serde_json::to_vec(&payload).unwrap_or_default().as_slice())
+                            .await;
+                    if inner.status_code != 200 {
+                        return inner;
+                    }
+                    let parsed: serde_json::Value =
+                        serde_json::from_slice(&inner.body).unwrap_or(serde_json::json!({}));
+                    json_response(200, &mcp::ok_response(id, parsed))
+                }
+                _ => json_response(404, &mcp::err_response(id, "unknown tool")),
+            }
+        }
+        _ => json_response(404, &mcp::err_response(id, "unknown method")),
+    }
 }
 
 async fn handle_chat(body: &[u8]) -> HttpResponse {
@@ -470,6 +553,7 @@ async fn http_request_update(req: HttpRequest) -> HttpResponse {
                 )
             }
             "/v1/chat/completions" => return handle_chat(&req.body).await,
+            "/mcp" => return handle_mcp(&req.body).await,
             _ => {}
         }
     }
@@ -504,6 +588,7 @@ fn http_request(req: HttpRequest) -> HttpResponse {
     match path.as_str() {
         "/v1/models" => handle_models(),
         "/v1/status" => handle_status(),
+        "/mcp" => json_response(200, &mcp::handle_get()),
         p if p.starts_with("/blob/") => HttpResponse {
             status_code: 307,
             headers: vec![HeaderField(

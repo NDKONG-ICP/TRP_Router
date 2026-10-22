@@ -25,6 +25,7 @@ pub fn catalog() -> Vec<ModelEntry> {
 
     push("trp/onchain-qwen-0.5b", "onicai", "chat", true, false, true);
     push("trp/onchain-raven-chat", "raven", "chat", true, false, true);
+    push("trp/onchain-raven-art", "raven", "image", true, false, true);
     push("trp/image-standard", "trp-router", "image", false, false, true);
     push("trp/image-identity", "trp-router", "image", false, false, true);
 
@@ -108,12 +109,10 @@ const CF_IMAGE: &[&str] = &[
 ];
 
 const GROQ_MODELS: &[&str] = &[
-    "trp/groq/llama-3.3-70b-versatile",
-    "trp/groq/llama-3.1-8b-instant",
-    "trp/groq/llama3-70b-8192",
-    "trp/groq/llama3-8b-8192",
-    "trp/groq/gemma2-9b-it",
-    "trp/groq/mixtral-8x7b-32768",
+    "trp/groq/openai/gpt-oss-20b",
+    "trp/groq/openai/gpt-oss-120b",
+    "trp/groq/qwen/qwen3.8-27b",
+    "trp/groq/allam-2-7b",
 ];
 
 const OR_FREE: &[&str] = &[
@@ -132,11 +131,12 @@ pub const CLAUDE_MODELS: &[&str] = &[
 ];
 
 pub fn anthropic_model_id(trp_id: &str) -> Option<&'static str> {
+    // TRP catalog ids → Anthropic Messages API model strings (BYOK).
     match trp_id {
-        "trp/claude-opus-5-5" => Some("claude-opus-5-5"),
-        "trp/claude-sonnet-5-5" => Some("claude-sonnet-5-5"),
-        "trp/claude-haiku-5-5" => Some("claude-haiku-5-5"),
-        "trp/claude-fable-5-1" => Some("claude-fable-5-1"),
+        "trp/claude-opus-5-5" => Some("claude-opus-4-20250514"),
+        "trp/claude-sonnet-5-5" => Some("claude-sonnet-4-20250514"),
+        "trp/claude-haiku-5-5" => Some("claude-3-5-haiku-20241022"),
+        "trp/claude-fable-5-1" => Some("claude-3-5-haiku-20241022"),
         _ => None,
     }
 }

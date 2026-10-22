@@ -23,15 +23,28 @@ const env = Object.fromEntries(
       return [l.slice(0, i).trim(), l.slice(i + 1).trim()];
     }),
 );
-const opt = (v) => (v ? `(opt "${String(v).replace(/"/g, '\\"')}")` : "null");
+
+/** Candid text literal; outer shell uses single quotes so inner " are safe. */
+const opt = (v) => {
+  if (!v) return "null";
+  const esc = String(v).replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+  return `(opt "${esc}")`;
+};
+
+const shellArg = (candidTuple) => `'${candidTuple.replace(/'/g, `'\\''`)}'`;
+
 if (env.CLOUDFLARE_ACCOUNT_ID || env.CLOUDFLARE_API_TOKEN || env.GEMINI_API_KEY) {
   dfx(
-    `canister call router_canister set_provider_keys "(${opt(env.CLOUDFLARE_ACCOUNT_ID)}, ${opt(env.CLOUDFLARE_API_TOKEN)}, ${opt(env.GEMINI_API_KEY)})"`,
+    `canister call router_canister set_provider_keys ${shellArg(
+      `(${opt(env.CLOUDFLARE_ACCOUNT_ID)}, ${opt(env.CLOUDFLARE_API_TOKEN)}, ${opt(env.GEMINI_API_KEY)})`,
+    )}`,
   );
 }
 if (env.GROQ_API_KEY || env.OPENROUTER_API_KEY || env.ANTHROPIC_API_KEY) {
   dfx(
-    `canister call router_canister set_chat_vault_keys "(${opt(env.GROQ_API_KEY)}, ${opt(env.OPENROUTER_API_KEY)}, ${opt(env.ANTHROPIC_API_KEY)})"`,
+    `canister call router_canister set_chat_vault_keys ${shellArg(
+      `(${opt(env.GROQ_API_KEY)}, ${opt(env.OPENROUTER_API_KEY)}, ${opt(env.ANTHROPIC_API_KEY)})`,
+    )}`,
   );
 }
 console.log("vault keys applied (values not logged)");

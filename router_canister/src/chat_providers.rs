@@ -19,6 +19,8 @@ struct OpenAiChatReq<'a> {
     model: &'a str,
     messages: &'a [OpenAiMsg<'a>],
     max_tokens: u32,
+    temperature: f32,
+    seed: u32,
 }
 
 #[derive(Serialize)]
@@ -84,7 +86,9 @@ async fn groq_chat(
     let body = OpenAiChatReq {
         model,
         messages: &msgs,
-        max_tokens: 1024,
+        max_tokens: 256,
+        temperature: 0.0,
+        seed: 42,
     };
     let bytes = serde_json::to_vec(&body).map_err(|e| e.to_string())?;
     let resp = image_providers::http_post_json(
@@ -124,7 +128,9 @@ async fn openrouter_chat(
     let body = OpenAiChatReq {
         model,
         messages: &msgs,
-        max_tokens: 1024,
+        max_tokens: 256,
+        temperature: 0.0,
+        seed: 42,
     };
     let bytes = serde_json::to_vec(&body).map_err(|e| e.to_string())?;
     let resp = image_providers::http_post_json(

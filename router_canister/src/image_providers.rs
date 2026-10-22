@@ -83,7 +83,8 @@ async fn outcall_post_json(url: String, headers: Vec<HttpHeader>, body: Vec<u8>)
         return Ok(resp.body);
     }
     if status >= 400 {
-        return Err(format!("upstream {status}"));
+        let snippet = String::from_utf8_lossy(&resp.body[..resp.body.len().min(200)]);
+        return Err(format!("upstream {status} {snippet}"));
     }
     Ok(resp.body)
 }

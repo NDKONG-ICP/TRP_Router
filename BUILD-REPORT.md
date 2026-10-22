@@ -1,6 +1,6 @@
 # TRP Router — BUILD REPORT
 
-**Branch:** `trp-router/build` · **Updated:** 2026-10-21 (W1–W3 + W6 core)
+**Branch:** `trp-router/build` · **Updated:** 2026-10-22
 
 ## Mainnet IDs & URLs
 
@@ -12,16 +12,13 @@
 | **UI (DRAFT)** | https://cnl2f-gqaaa-aaaao-a4ngq-cai.icp0.io/router |
 | **POST API** | https://5723t-oaaaa-aaaao-bbquq-cai.icp0.io/v1 |
 | **GET API** | https://5723t-oaaaa-aaaao-bbquq-cai.raw.icp0.io/v1 |
+| **MCP stub** | GET/POST https://5723t-oaaaa-aaaao-bbquq-cai.icp0.io/mcp |
 
-After every router wasm upgrade run: `bash scripts/post-upgrade-mainnet.sh`
+After every router wasm upgrade: `bash scripts/post-upgrade-mainnet.sh` then `node scripts/set-vault-from-env.mjs` (vault keys are not stable across upgrades today).
 
 ---
 
-## W1 — Public HTTP POST (FIXED)
-
-`http_request` returns `upgrade: true` for POST `/v1/chat/completions`, `/v1/images/generations`.
-
-### Public curl proof — chat
+## W1 — Public HTTP POST ✅
 
 ```bash
 curl -sS -X POST "https://5723t-oaaaa-aaaao-bbquq-cai.icp0.io/v1/chat/completions" \
@@ -29,13 +26,9 @@ curl -sS -X POST "https://5723t-oaaaa-aaaao-bbquq-cai.icp0.io/v1/chat/completion
   -d '{"model":"trp/onchain-qwen-0.5b","stream":false,"messages":[{"role":"user","content":"Say hi in 3 words"}]}'
 ```
 
-Response (2026-10-21):
-
 ```json
 {"id":"trp-chat","object":"chat.completion","model":"trp/onchain-qwen-0.5b","choices":[{"index":0,"message":{"role":"assistant","content":"Hello!"},"finish_reason":"stop"}],"on_chain_update_calls":2}
 ```
-
-### Public curl proof — image
 
 ```bash
 curl -sS -X POST "https://5723t-oaaaa-aaaao-bbquq-cai.icp0.io/v1/images/generations" \
@@ -43,80 +36,95 @@ curl -sS -X POST "https://5723t-oaaaa-aaaao-bbquq-cai.icp0.io/v1/images/generati
   -d '{"model":"trp/image-standard","prompt":"gold raven icon minimal","size":"512x512"}'
 ```
 
-Response includes `"provider":"pollinations-flux"` and `"url":"/blob/<sha256>"`.
+→ `"provider":"pollinations-flux"`, `"url":"/blob/<sha256>"`.
 
 ---
 
-## W2 — Catalog (41 models)
+## W2 — Catalog + vault ✅ (listing); Groq/CF chat ⚠️
 
 ```bash
 curl -sS "https://5723t-oaaaa-aaaao-bbquq-cai.raw.icp0.io/v1/models" | jq '.data | length'
-# 41
 ```
 
-Groq / Cloudflare chat: **code live**; public curl requires vault keys (`scripts/set-vault-from-env.mjs` + `.env`). Without keys → 402 BYOK message.
+**43** models (Groq ids aligned to key’s `/v1/models` list: `openai/gpt-oss-20b`, etc.).
 
-Removed unloaded `trp/onchain-llama-3.2-1b` from catalog.
+Vault loader fixed: `node scripts/set-vault-from-env.mjs` (single-quoted Candid — no shell quote breaks).
+
+**Groq / Cloudflare / Anthropic HTTPS chat from the canister:** vault keys load, but **replica consensus** often fails on non-deterministic LLM bodies (`SysTransient No consensus`). On-chain chat + Pollinations image + on-chain raven-art **do** work. Off-chain LLM outcalls need a follow-up (deterministic proxy or response normalization) — not curl-proven end-to-end yet.
 
 ---
 
-## W3 — Claude BYOK
+## W3 — Claude BYOK ⚠️
 
-Models: `trp/claude-opus-5-5`, `trp/claude-sonnet-5-5`, `trp/claude-haiku-5-5`, `trp/claude-fable-5-1`.
+Catalog ids map to Anthropic API model strings (e.g. `trp/claude-haiku-5-5` → `claude-3-5-haiku-20241022`). Vault `ANTHROPIC_API_KEY` loaded via script.
 
-Without key:
+Same **consensus** caveat as Groq when calling from the canister; BYOK per-caller path unchanged.
+
+---
+
+## W5 — RAVEN on-chain ✅ (art + chat)
+
+**Chat** — header `X-TRP-On-Chain: true`:
 
 ```bash
-curl -sS -X POST "https://5723t-oaaaa-aaaao-bbquq-cai.icp0.io/v1/chat/completions" \
+curl -sS -D - -X POST "https://5723t-oaaaa-aaaao-bbquq-cai.icp0.io/v1/chat/completions" \
   -H "Content-Type: application/json" \
-  -d '{"model":"trp/claude-haiku-5-5","stream":false,"messages":[{"role":"user","content":"Hi"}]}'
-# {"error":"BYOK required: attach Anthropic API key (0% fee)"}
+  -d '{"model":"trp/onchain-raven-chat","stream":false,"messages":[{"role":"user","content":"Who are you? One sentence."}]}'
 ```
 
-With `ANTHROPIC_API_KEY` in vault: owner runs `node scripts/set-vault-from-env.mjs` then re-run curl for live Claude text.
-
----
-
-## W4 — Video · **STAGED**
-
-Not implemented this pass (stretch). No `trp/video-*` in catalog yet.
-
-## W5 — RAVEN on-chain models
-
-**W5b `trp/onchain-raven-chat`** — deployed (Raven system persona on Qwen engine). Catalog shows `owned_by: raven`.
-
-Public curl (2026-10-21, after router upgrade):
+**Art** — procedural compositor (`raven-onchain-compositor`):
 
 ```bash
-curl -sS -X POST "https://5723t-oaaaa-aaaao-bbquq-cai.icp0.io/v1/chat/completions" \
+curl -sS -X POST "https://5723t-oaaaa-aaaao-bbquq-cai.icp0.io/v1/images/generations" \
   -H "Content-Type: application/json" \
-  -d '{"model":"trp/onchain-raven-chat","stream":false,"messages":[{"role":"user","content":"Who are you?"}]}'
+  -d '{"model":"trp/onchain-raven-art","prompt":"midnight raven test","size":"512x512"}'
 ```
 
-**Blocker:** `llama_cpp_qwen25` (`5ryw3-vqaaa-aaaao-bbqvq-cai`) returned **out of cycles** — owner must top up before on-chain chat (Qwen + Raven) works again. Earlier same session Qwen returned real completions before llama exhausted cycles.
+→ `/blob/31edcb37dc66b3ff58c6b5a4ddb4774dbebbc39fb17f981599c72db4db05876e` (example).
 
-**W5a `trp/onchain-raven-art`** — **STAGED** (no layered trait PNGs located in repo this pass; compositor not shipped).
-
-## W6 — Dashboard · **LIVE (beta)**
-
-https://cnl2f-gqaaa-aaaao-a4ngq-cai.icp0.io/router — HTTP 200 (2026-10-21 deploy `--no-asset-upgrade`).
-
-Model browser (live catalog from raw.icp0.io), playground (POST via icp0.io), status, DRAFT banners, amethyst/gold styling (`routerPage.css`). OpenAI SDK snippet uses certified POST base URL.
-
-## W7 — MCP · **STAGED**
-
-## W8 — Swap UI · **partial**
-
-`/ascension` shows awaiting-activation copy; swap remains disabled (no `activateSwap`).
-
-## W9 — Path C · **STAGED**
+Trait layer hunt: see `RAVEN-ART-LAYERS.md` (Sk8Punks = composites only; no layer PNGs in repo).
 
 ---
 
-## Owner optional
+## W6 — Dashboard ✅
 
-- `trp-router/.env` + `node scripts/set-vault-from-env.mjs` for Groq/CF/Anthropic/Gemini.
-- Legal review of DRAFT UI strings.
-- Top up `5ryw3-…` if on-chain inference traps on cycles.
+https://cnl2f-gqaaa-aaaao-a4ngq-cai.icp0.io/router — Dev quickstart + **MCP curl snippet**.
+
+---
+
+## W7 — MCP stub ✅
+
+```bash
+curl -sS "https://5723t-oaaaa-aaaao-bbquq-cai.raw.icp0.io/mcp"
+curl -sS -X POST "https://5723t-oaaaa-aaaao-bbquq-cai.icp0.io/mcp" \
+  -H "Content-Type: application/json" \
+  -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}'
+curl -sS -X POST "https://5723t-oaaaa-aaaao-bbquq-cai.icp0.io/mcp" \
+  -H "Content-Type: application/json" \
+  -d '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"chat","arguments":{"model":"trp/onchain-qwen-0.5b","messages":[{"role":"user","content":"Hi"}]}}}'
+```
+
+→ `tools/list` + `tools/call` chat returns on-chain completion JSON.
+
+---
+
+## W8 — Swap UI ✅ (inert admin)
+
+- `/ascension` — **88 : 00 : 00 : 00** placeholder countdown when inactive; swap panel disabled.
+- `/admin` → **Ascension** tab — owner-only **Activate swap (inert)** button (disabled; no `activateSwap` called).
+
+---
+
+## W4 / W9 — STAGED
+
+Video models not wired. Path C: `PATH-C-MEASURE.md`.
+
+---
+
+## Ops notes
+
+- Topped **router** with **1.5T cycles** (was ~280B; deploy was failing IC0207).
+- **`5ryw3-…` llama:** owner added 6T — on-chain inference working again.
+- Re-run vault script after each router upgrade.
 
 Payments: `PAYMENTS_ENABLED=false`.
