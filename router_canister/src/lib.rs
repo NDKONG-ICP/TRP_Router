@@ -92,11 +92,16 @@ fn relay_config() -> Option<relay_client::RelayConfig> {
 }
 
 fn public_blob_url(blob_id: &str) -> String {
-    format!(
-        "https://{}.raw.icp0.io/blob/{}",
-        ic_cdk::id().to_text(),
-        blob_id
-    )
+    let store = BLOB_STORE.with(|b| b.borrow().clone());
+    if let Some(bs) = store {
+        format!("https://{}.raw.icp0.io/blob/{}", bs.to_text(), blob_id)
+    } else {
+        format!(
+            "https://{}.raw.icp0.io/blob/{}",
+            ic_cdk::id().to_text(),
+            blob_id
+        )
+    }
 }
 
 fn json_response(status: u16, body: &str) -> HttpResponse {
@@ -621,16 +626,28 @@ fn http_request(req: HttpRequest) -> HttpResponse {
         "/v1/models" => handle_models(),
         "/v1/status" => handle_status(),
         "/mcp" => json_response(200, &mcp::handle_get()),
-        p if p.starts_with("/blob/") => HttpResponse {
-            status_code: 307,
-            headers: vec![HeaderField(
-                "Location".into(),
-                format!("/blob/{}", p.trim_start_matches("/blob/")),
-            )],
-            body: vec![],
-            streaming_strategy: None,
-            upgrade: None,
-        },
+        p if p.starts_with("/blob/") => {
+            let blob_id = p.trim_start_matches("/blob/").trim_start_matches('/');
+            let blob_store = BLOB_STORE.with(|b| b.borrow().clone());
+            if let Some(bs) = blob_store {
+                HttpResponse {
+                    status_code: 302,
+                    headers: vec![HeaderField(
+                        "Location".into(),
+                        format!(
+                            "https://{}.raw.icp0.io/blob/{}",
+                            bs.to_text(),
+                            blob_id
+                        ),
+                    )],
+                    body: vec![],
+                    streaming_strategy: None,
+                    upgrade: None,
+                }
+            } else {
+                json_response(404, r#"{"error":"blob_store not configured"}"#)
+            }
+        }
         _ => json_response(404, r#"{"error":"not found"}"#),
     }
 }

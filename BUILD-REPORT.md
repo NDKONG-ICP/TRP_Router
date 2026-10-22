@@ -23,11 +23,17 @@ curl -sS -X POST "https://5723t-oaaaa-aaaao-bbquq-cai.icp0.io/v1/images/generati
   -d '{"model":"trp/image-standard","prompt":"raven test blob url","size":"512x512"}'
 ```
 
-Example `router_url`:
+Example `router_url` (points at **blob_store**, not localhost):
 
-`https://5723t-oaaaa-aaaao-bbquq-cai.raw.icp0.io/blob/019c6abce15d8f04d4abbd81b50dcaac00c070f921e2591ede2dd5e9efe1b0fa`
+`https://5y35h-dyaaa-aaaao-bbqua-cai.raw.icp0.io/blob/6bcfe90d1f5f0d795fe2899b6c8aec922f47d91aa31a33fcffd8bc263f7187d3`
 
-(replaces `http://…localhost:8000/blob/…`)
+```bash
+curl -sSL -o /dev/null -w "%{http_code} %{size_download}\n" \
+  "https://5y35h-dyaaa-aaaao-bbqua-cai.raw.icp0.io/blob/6bcfe90d1f5f0d795fe2899b6c8aec922f47d91aa31a33fcffd8bc263f7187d3"
+# 200 37323
+```
+
+Router `/blob/…` returns **302** to blob_store (fixes redirect loop).
 
 ---
 
