@@ -7,7 +7,7 @@ bindings = [{ name = "INFER_DO", class_name = "InferCoordinator" }]
 
 [[migrations]]
 tag = "v1"
-new_classes = ["InferCoordinator"]
+new_sqlite_classes = ["InferCoordinator"]
 
 [vars]
 # RELAY_SHARED_SECRET and provider keys via `wrangler secret put`

@@ -1,120 +1,95 @@
 # TRP Router — BUILD REPORT
 
-**Branch:** `trp-router/build` · **Updated:** 2026-10-22 (relay + blob fix)
+**Branch:** `trp-router/build` · **Updated:** 2026-10-22 (relay live)
 
 ## Mainnet
 
 | | |
 |--|--|
 | **router** | `5723t-oaaaa-aaaao-bbquq-cai` |
-| **POST** | https://5723t-oaaaa-aaaao-bbquq-cai.icp0.io/v1 |
-| **GET** | https://5723t-oaaaa-aaaao-bbquq-cai.raw.icp0.io/v1 |
+| **blob_store** | `5y35h-dyaaa-aaaao-bbqua-cai` |
+| **relay** | `https://trp-router-relay.floridaman.workers.dev/infer` |
+| **POST/GET API** | https://5723t-oaaaa-aaaao-bbquq-cai.raw.icp0.io/v1 (POST chat verified) |
 | **UI** | https://cnl2f-gqaaa-aaaao-a4ngq-cai.icp0.io/router |
 
-Post-upgrade: `bash scripts/post-upgrade-mainnet.sh` then `node scripts/set-vault-from-env.mjs`
+After router wasm upgrade: `bash scripts/post-upgrade-mainnet.sh` then `node scripts/set-vault-from-env.mjs`
 
 ---
 
-## R3 — Blob URL fix ✅
+## Relay (R1 + R2) ✅
+
+- Worker + **sqlite** Durable Object (`new_sqlite_classes` on free plan).
+- Direct relay smoke (2026-10-22):
 
 ```bash
-curl -sS -X POST "https://5723t-oaaaa-aaaao-bbquq-cai.icp0.io/v1/images/generations" \
+curl -sS -X POST "https://trp-router-relay.floridaman.workers.dev/infer" \
+  -H "Authorization: Bearer <RELAY_SHARED_SECRET>" \
   -H "Content-Type: application/json" \
-  -d '{"model":"trp/image-standard","prompt":"raven test blob url","size":"512x512"}'
-```
-
-Example `router_url` (points at **blob_store**, not localhost):
-
-`https://5y35h-dyaaa-aaaao-bbqua-cai.raw.icp0.io/blob/6bcfe90d1f5f0d795fe2899b6c8aec922f47d91aa31a33fcffd8bc263f7187d3`
-
-```bash
-curl -sSL -o /dev/null -w "%{http_code} %{size_download}\n" \
-  "https://5y35h-dyaaa-aaaao-bbqua-cai.raw.icp0.io/blob/6bcfe90d1f5f0d795fe2899b6c8aec922f47d91aa31a33fcffd8bc263f7187d3"
-# 200 37323
-```
-
-Router `/blob/…` returns **302** to blob_store (fixes redirect loop).
-
----
-
-## R4 — Catalog trim ✅
-
-```bash
-curl -sS "https://5723t-oaaaa-aaaao-bbquq-cai.raw.icp0.io/v1/models" | jq '.data | length'
-# 18 — on-chain + Pollinations + relay-listed Groq/CF/Claude/Gemini/OR only
-```
-
-Non–smoke-tested CF embed/TTS/whisper and deprecated Groq slugs removed.
-
----
-
-## R5 — Claude ids ✅ (canister mapping)
-
-| TRP id | Anthropic API model |
-|--------|---------------------|
-| `trp/claude-opus-5-5` | `claude-opus-5-5` |
-| `trp/claude-sonnet-5-5` | `claude-sonnet-5-5` |
-| `trp/claude-haiku-5-5` | `claude-haiku-5-5` |
-| `trp/claude-fable-5-1` | `claude-fable-5-1` |
-
-Public curl proof pending **relay deploy** (BYOK).
-
----
-
-## R1 — Relay ⚠️ STAGED (built, not deployed)
-
-- Code: `trp-router/relay/` (Worker + Durable Object + `standalone.mjs` fallback).
-- **Blocker:** `wrangler deploy` with account API token → `No access to the specified resource` (token lacks Workers deploy). Owner: `wrangler login` or a Workers-capable token, then follow `relay/DEPLOY.md`.
-
-Direct relay smoke (after deploy):
-
-```bash
-curl -sS -X POST "$RELAY_URL" \
-  -H "Authorization: Bearer $RELAY_SHARED_SECRET" \
-  -H "Content-Type: application/json" \
-  -d '{"provider":"groq","model":"openai/gpt-oss-20b","messages":[{"role":"user","content":"hi"}],"idempotency_key":"smoke-1"}'
-```
-
----
-
-## R2 — Canister → relay wiring ✅ (awaits RELAY_URL in vault)
-
-Off-chain chat without relay:
-
-```bash
-curl -sS -X POST "https://5723t-oaaaa-aaaao-bbquq-cai.icp0.io/v1/chat/completions" \
-  -H "Content-Type: application/json" \
-  -d '{"model":"trp/groq/openai/gpt-oss-20b","stream":false,"messages":[{"role":"user","content":"hi"}]}'
+  -d '{"provider":"groq","model":"openai/gpt-oss-20b","messages":[{"role":"user","content":"Say exactly: relay-ok"}],"idempotency_key":"direct-smoke-1"}'
 ```
 
 ```json
-{"error":"off-chain chat requires relay (set RELAY_URL + RELAY_SHARED_SECRET in vault)"}
+{"ok":true,"content":"relay-ok","upstream_calls":1}
 ```
 
-Add to `trp-router/.env`:
+Canister vault: `set_relay_config` via `scripts/set-vault-from-env.mjs` (`RELAY_URL` + `RELAY_SHARED_SECRET` in owner `.env` only — not committed).
 
-```
-RELAY_URL=https://<worker-host>/infer
-RELAY_SHARED_SECRET=<same as wrangler secret>
-```
-
-Then `node scripts/set-vault-from-env.mjs` and re-run Groq / CF / Claude public curls (expected: real completions, no consensus error).
-
-**On-chain** (unchanged, no relay):
-
-```bash
-curl -sS -X POST "https://5723t-oaaaa-aaaao-bbquq-cai.icp0.io/v1/chat/completions" \
-  -H "Content-Type: application/json" \
-  -d '{"model":"trp/onchain-qwen-0.5b","stream":false,"messages":[{"role":"user","content":"Hi"}]}'
-```
+**Wrangler note:** use OAuth (`wrangler login`) and `unset CLOUDFLARE_API_TOKEN` before deploy — the Workers AI token in `.env` lacks Workers script permissions.
 
 ---
 
-## Owner checklist (relay go-live)
+## Public curl — off-chain chat (consensus fixed) ✅
 
-1. Deploy Worker per `relay/DEPLOY.md` (or run `standalone.mjs` on a single VPS + HTTPS).
-2. `wrangler secret put` provider keys + `RELAY_SHARED_SECRET`.
-3. Set `RELAY_URL` + `RELAY_SHARED_SECRET` in `.env` → `node scripts/set-vault-from-env.mjs`.
-4. Public curl Groq + CF + Claude; paste outputs here.
+Base: `https://5723t-oaaaa-aaaao-bbquq-cai.raw.icp0.io/v1`
+
+### Groq
+
+```bash
+curl -sS -X POST "https://5723t-oaaaa-aaaao-bbquq-cai.raw.icp0.io/v1/chat/completions" \
+  -H "Content-Type: application/json" \
+  -d '{"model":"trp/groq/openai/gpt-oss-20b","stream":false,"messages":[{"role":"user","content":"Say exactly: groq-ok"}]}'
+```
+
+```json
+{"id":"trp-chat","object":"chat.completion","model":"trp/groq/openai/gpt-oss-20b","choices":[{"index":0,"message":{"role":"assistant","content":"groq-ok"},"finish_reason":"stop"}]}
+```
+
+### Cloudflare LLM
+
+```bash
+curl -sS -X POST "https://5723t-oaaaa-aaaao-bbquq-cai.raw.icp0.io/v1/chat/completions" \
+  -H "Content-Type: application/json" \
+  -d '{"model":"trp/cf/@cf/meta/llama-3.2-1b-instruct","stream":false,"messages":[{"role":"user","content":"Reply with exactly: cf-ok"}]}'
+```
+
+```json
+{"id":"trp-chat","object":"chat.completion","model":"trp/cf/@cf/meta/llama-3.2-1b-instruct","choices":[{"index":0,"message":{"role":"assistant","content":"I'm ready to respond."},"finish_reason":"stop"}]}
+```
+
+### Claude (platform Anthropic key on relay)
+
+```bash
+curl -sS -X POST "https://5723t-oaaaa-aaaao-bbquq-cai.raw.icp0.io/v1/chat/completions" \
+  -H "Content-Type: application/json" \
+  -d '{"model":"trp/claude-haiku-5-5","stream":false,"messages":[{"role":"user","content":"Reply with exactly: claude-ok"}]}'
+```
+
+```json
+{"id":"trp-chat","object":"chat.completion","model":"trp/claude-haiku-5-5","choices":[{"index":0,"message":{"role":"assistant","content":"claude-ok"},"finish_reason":"stop"}]}
+```
+
+No `No consensus could be reached` on these runs (2026-10-22).
+
+---
+
+## Blob URLs (R3) ✅
+
+`router_url` → `https://5y35h-dyaaa-aaaao-bbqua-cai.raw.icp0.io/blob/<hash>` — curl returns image bytes (200).
+
+---
+
+## Catalog (R4)
+
+18 smoke-listed models on `/v1/models`.
 
 Payments: `PAYMENTS_ENABLED=false`.
