@@ -1,0 +1,29 @@
+{
+  "version": 1,
+  "canisters": {
+    "diffusion_canister": {
+      "type": "custom",
+      "candid": "diffusion_canister.did",
+      "wasm": "build/diffusion_canister.wasm",
+      "build": "scripts/build-icpp.sh",
+      "metadata": [
+        {
+          "name": "candid:service",
+          "visibility": "public"
+        }
+      ]
+    },
+    "blob_store": {
+      "type": "custom",
+      "candid": "../blob_store/blob_store.did",
+      "wasm": "../target/wasm32-unknown-unknown/release/blob_store.wasm",
+      "build": "cargo build --release --target wasm32-unknown-unknown -p blob_store --manifest-path ../Cargo.toml"
+    }
+  },
+  "defaults": {
+    "build": {
+      "packtool": ""
+    }
+  },
+  "output_env_file": ".env.pathc"
+}

@@ -1,0 +1,19 @@
+type BuildPhase = variant {
+  c1_toolchain;
+  c2_wasm_blocked;
+  c3_model_ready;
+  c4_inference_pending;
+  c5_ready;
+};
+
+type Status = record {
+  phase : BuildPhase;
+  message : text;
+  sd_cpp_commit : text;
+  model_sha256 : opt text;
+  wasm_linked : bool;
+};
+
+service : {
+  status : () -> (Status) query;
+};

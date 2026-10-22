@@ -1,0 +1,62 @@
+type BuildPhase = variant {
+  c1_toolchain;
+  c2_wasm_blocked;
+  c3_model_ready;
+  c4_inference_pending;
+  c5_ready;
+};
+
+type StageTiming = record {
+  stage : text;
+  instructions : nat64;
+  update_calls : nat32;
+  wall_ms : nat64;
+};
+
+type Status = record {
+  phase : BuildPhase;
+  message : text;
+  sd_cpp_commit : text;
+  model_sha256 : opt text;
+  wasm_linked : bool;
+};
+
+type BeginArgs = record {
+  prompt : text;
+  seed : nat64;
+  steps : nat32;
+  height : nat32;
+  width : nat32;
+};
+
+type BeginResult = variant { ok : nat64; err : text };
+
+type StepResult = variant {
+  ok : record { step_index : nat32; instructions : nat64; wall_ms : nat64 };
+  err : text;
+};
+
+type FinishResult = variant {
+  ok : record { png_sha256 : text; bytes_len : nat64 };
+  err : text;
+};
+
+service : {
+  status : () -> (Status) query;
+  upload_weights_chunk : (record { offset : nat64; chunk : blob }) -> (variant { ok; err : text });
+  upload_taesd_chunk : (record { offset : nat64; chunk : blob }) -> (variant { ok; err : text });
+  weights_bytes_loaded : () -> (nat64) query;
+  taesd_bytes_loaded : () -> (nat64) query;
+  begin : (BeginArgs) -> (BeginResult);
+  step : (nat32) -> (StepResult);
+  finish : () -> (FinishResult);
+  get_png : () -> (variant { ok : blob; err : text }) query;
+  last_timings : () -> (
+    record {
+      stage : vec text;
+      instructions : vec nat64;
+      update_calls : vec nat32;
+      wall_ms : vec nat64;
+    }
+  ) query;
+};

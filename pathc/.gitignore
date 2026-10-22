@@ -1,0 +1,10 @@
+models/*.gguf
+models/*.safetensors
+tmp/*.png
+tmp/*.time.txt
+.env.pathc
+.dfx/
+build/*.wasm
+vendor/stable-diffusion.cpp/
+!vendor/stable-diffusion.cpp/.gitkeep
+wasi-shims/wasi-shims/

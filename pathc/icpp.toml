@@ -1,0 +1,138 @@
+# Path C — stable-diffusion.cpp → IC WASM (mirrors onicai llama_cpp_canister icpp.toml)
+# Build from space-free symlink: cd /tmp/trp-pathc && icpp build-wasm
+
+[build-wasm]
+canister = "diffusion_canister"
+did_path = "diffusion_canister.did"
+
+cpp_paths = [
+    # Canister API + WASI stubs (glob picks src-icpp/wasi-*.cpp)
+    "src-icpp/diffusion_canister.cpp",
+    "src-icpp/pathc_upload.cpp",
+    "src-icpp/pathc_infer.cpp",
+    "src-icpp/wasi-exception-stubs.cpp",
+    "src-icpp/wasi-dl-stubs.cpp",
+
+    # stable-diffusion.cpp core (no examples/server)
+    "vendor/stable-diffusion.cpp/src/*.cpp",
+    "vendor/stable-diffusion.cpp/src/conditioning/*.cpp",
+    "vendor/stable-diffusion.cpp/src/core/*.cpp",
+    "vendor/stable-diffusion.cpp/src/core/probe/*.cpp",
+    "vendor/stable-diffusion.cpp/src/extensions/*.cpp",
+    "vendor/stable-diffusion.cpp/src/model/*/*.cpp",
+    "vendor/stable-diffusion.cpp/src/pipeline/*.cpp",
+    "vendor/stable-diffusion.cpp/src/runtime/*.cpp",
+    "vendor/stable-diffusion.cpp/src/model_io/*.cpp",
+    "vendor/stable-diffusion.cpp/src/tokenizers/*.cpp",
+    "vendor/stable-diffusion.cpp/src/tokenizers/vocab/*.cpp",
+
+    # ggml C++ (CPU only — no cuda/metal/vulkan/opencl backends)
+    "vendor/stable-diffusion.cpp/ggml/src/ggml.cpp",
+    "vendor/stable-diffusion.cpp/ggml/src/gguf.cpp",
+    "vendor/stable-diffusion.cpp/ggml/src/ggml-backend.cpp",
+    "vendor/stable-diffusion.cpp/ggml/src/ggml-backend-reg.cpp",
+    "vendor/stable-diffusion.cpp/ggml/src/ggml-backend-dl.cpp",
+    "vendor/stable-diffusion.cpp/ggml/src/ggml-backend-meta.cpp",
+    "vendor/stable-diffusion.cpp/ggml/src/ggml-opt.cpp",
+    "vendor/stable-diffusion.cpp/ggml/src/ggml-threading.cpp",
+    "vendor/stable-diffusion.cpp/ggml/src/ggml-cpu/ggml-cpu.cpp",
+    "vendor/stable-diffusion.cpp/ggml/src/ggml-cpu/ops.cpp",
+    "vendor/stable-diffusion.cpp/ggml/src/ggml-cpu/binary-ops.cpp",
+    "vendor/stable-diffusion.cpp/ggml/src/ggml-cpu/unary-ops.cpp",
+    "vendor/stable-diffusion.cpp/ggml/src/ggml-cpu/vec.cpp",
+    "vendor/stable-diffusion.cpp/ggml/src/ggml-cpu/traits.cpp",
+    "vendor/stable-diffusion.cpp/ggml/src/ggml-cpu/repack.cpp",
+    "vendor/stable-diffusion.cpp/ggml/src/ggml-cpu/tiled/tiled.cpp",
+    "vendor/stable-diffusion.cpp/ggml/src/ggml-cpu/tiled/tiled-kernel.cpp",
+]
+
+cpp_include_dirs = [
+    ".",
+    "wasi-shims",
+    "vendor/stable-diffusion.cpp/include",
+    "vendor/stable-diffusion.cpp/src",
+    "vendor/stable-diffusion.cpp/thirdparty",
+    "vendor/stable-diffusion.cpp/ggml/include",
+    "vendor/stable-diffusion.cpp/ggml/src",
+    "vendor/stable-diffusion.cpp/ggml/src/ggml-cpu",
+    "vendor/stable-diffusion.cpp/thirdparty/oniguruma",
+    "vendor/stable-diffusion.cpp/thirdparty/utf8proc",
+    "thirdparty-wasi/oniguruma",
+    "src-icpp",
+]
+
+cpp_compile_flags = [
+    "-DNDEBUG",
+    "-DGGML_USE_CPU",
+    "-DGGML_MAX_NAME=160",
+    "-DTRP_PATHC_ICP",
+    "-DUTF8PROC_STATIC",
+    "-DONIG_STATIC",
+    "-msimd128",
+    "-fexceptions",
+    "-fmerge-all-constants",
+    "-D_WASI_EMULATED_SIGNAL",
+    "-D_WASI_EMULATED_PTHREAD",
+    "-D_WASI_EMULATED_GETPID",
+    "-D_WASI_EMULATED_PROCESS_CLOCKS",
+    "-D_WASI_EMULATED_MMAN",
+]
+
+cpp_link_flags = [
+    "-Wl,-z,stack-size=33554432",
+    "-lwasi-emulated-pthread",
+    "-lwasi-emulated-getpid",
+    "-lwasi-emulated-signal",
+    "-lwasi-emulated-process-clocks",
+    "-lwasi-emulated-mman",
+    "-fexceptions",
+]
+
+c_paths = [
+    "vendor/stable-diffusion.cpp/ggml/src/ggml.c",
+    "vendor/stable-diffusion.cpp/ggml/src/ggml-alloc.c",
+    "vendor/stable-diffusion.cpp/ggml/src/ggml-quants.c",
+    "vendor/stable-diffusion.cpp/ggml/src/ggml-cpu/ggml-cpu.c",
+    "vendor/stable-diffusion.cpp/ggml/src/ggml-cpu/quants.c",
+    "vendor/stable-diffusion.cpp/ggml/src/ggml-cpu/arch/wasm/quants.c",
+    "vendor/stable-diffusion.cpp/thirdparty/zip.c",
+    "vendor/stable-diffusion.cpp/thirdparty/utf8proc/utf8proc.c",
+    "vendor/stable-diffusion.cpp/thirdparty/oniguruma/ascii.c",
+    "vendor/stable-diffusion.cpp/thirdparty/oniguruma/regcomp.c",
+    "vendor/stable-diffusion.cpp/thirdparty/oniguruma/regenc.c",
+    "vendor/stable-diffusion.cpp/thirdparty/oniguruma/regerror.c",
+    "vendor/stable-diffusion.cpp/thirdparty/oniguruma/regexec.c",
+    "vendor/stable-diffusion.cpp/thirdparty/oniguruma/regparse.c",
+    "vendor/stable-diffusion.cpp/thirdparty/oniguruma/st.c",
+    "vendor/stable-diffusion.cpp/thirdparty/oniguruma/unicode.c",
+    "vendor/stable-diffusion.cpp/thirdparty/oniguruma/unicode_fold1_key.c",
+    "vendor/stable-diffusion.cpp/thirdparty/oniguruma/unicode_fold2_key.c",
+    "vendor/stable-diffusion.cpp/thirdparty/oniguruma/unicode_fold3_key.c",
+    "vendor/stable-diffusion.cpp/thirdparty/oniguruma/unicode_unfold_key.c",
+    "vendor/stable-diffusion.cpp/thirdparty/oniguruma/utf8.c",
+]
+
+c_include_dirs = [
+    "vendor/stable-diffusion.cpp/include",
+    "vendor/stable-diffusion.cpp/src",
+    "vendor/stable-diffusion.cpp/thirdparty",
+    "vendor/stable-diffusion.cpp/ggml/include",
+    "vendor/stable-diffusion.cpp/ggml/src",
+    "vendor/stable-diffusion.cpp/ggml/src/ggml-cpu",
+]
+
+c_compile_flags = [
+    "-DNDEBUG",
+    "-msimd128",
+    "-DGGML_USE_CPU",
+    "-DGGML_MAX_NAME=160",
+    "-DTRP_PATHC_ICP",
+    "-DUTF8PROC_STATIC",
+    "-DONIG_STATIC",
+    "-fmerge-all-constants",
+    "-D_WASI_EMULATED_SIGNAL",
+    "-D_WASI_EMULATED_PTHREAD",
+    "-D_WASI_EMULATED_GETPID",
+    "-D_WASI_EMULATED_PROCESS_CLOCKS",
+    "-D_WASI_EMULATED_MMAN",
+]
