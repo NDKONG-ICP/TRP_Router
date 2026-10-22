@@ -48,5 +48,6 @@ std::string pathc_sha256_hex(const std::vector<uint8_t> &data);
 
 void pathc_refresh_vfs_sizes();
 bool pathc_ensure_sd_ctx(std::string &err);
-bool pathc_step_load_model(std::string &err);
+bool pathc_step_load_model(std::string &err, bool &load_done,
+                           uint32_t &tensors_this_call);
 bool pathc_run_generate(std::string &err);

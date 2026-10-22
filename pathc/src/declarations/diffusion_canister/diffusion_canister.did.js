@@ -29,7 +29,10 @@ export const idlFactory = ({ IDL }) => {
     'ok' : IDL.Record({
       'instructions' : IDL.Nat64,
       'step_index' : IDL.Nat32,
+      'load_done' : IDL.Bool,
       'wall_ms' : IDL.Nat64,
+      'bytes_loaded' : IDL.Nat64,
+      'tensors_this_call' : IDL.Nat32,
     }),
     'err' : IDL.Text,
   });

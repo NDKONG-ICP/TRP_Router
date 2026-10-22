@@ -1,5 +1,6 @@
 #include "diffusion_canister.h"
 #include "pathc_internal.h"
+#include "pathc_stable.h"
 
 #include <fstream>
 #include <string>
@@ -35,6 +36,9 @@ void upload_weights_chunk() {
   ic_api.from_wire(in);
 
   std::string err;
+  // Stable mirror (P2): disabled until sub-chunk stable_write is validated on replica.
+  // Weights load from WASI VFS `model.gguf`; stable size query stays 0 until enabled.
+  (void)offset;
   if (!write_chunk(kModelGgufPath, offset, chunk, err)) {
     ic_api.to_wire(CandidTypeVariant{
         "err", CandidTypeText{err}});

@@ -70,9 +70,24 @@ async function runOnce(a, label) {
   console.log(label, "begin", { w, h, seed: seed.toString() });
   const b = await a.begin({ prompt, seed, steps: 1, width: w, height: h });
   if (b.err) throw new Error(String(b.err));
-  const st0 = await a.step(0);
-  console.log(label, "step0 load", JSON.stringify(st0, (_, v) => (typeof v === "bigint" ? v.toString() : v)));
-  if (st0.err) throw new Error(String(st0.err));
+  let loadCalls = 0;
+  let loadInstr = 0n;
+  for (;;) {
+    const st0 = await a.step(0);
+    loadCalls++;
+    console.log(
+      label,
+      "step0 load",
+      JSON.stringify(st0, (_, v) => (typeof v === "bigint" ? v.toString() : v)),
+    );
+    if (st0.err) throw new Error(String(st0.err));
+    loadInstr += st0.ok.instructions;
+    if (st0.ok.load_done) {
+      console.log(label, "load complete", { loadCalls, loadInstr: loadInstr.toString() });
+      break;
+    }
+    if (loadCalls > 500) throw new Error("load exceeded 500 update calls");
+  }
   const st1 = await a.step(1);
   console.log(label, "step1 generate", JSON.stringify(st1, (_, v) => (typeof v === "bigint" ? v.toString() : v)));
   if (st1.err) throw new Error(String(st1.err));

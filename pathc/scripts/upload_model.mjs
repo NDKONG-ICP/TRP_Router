@@ -93,7 +93,14 @@ const taesd = process.argv[3] || join(root, "models/taesd.safetensors");
 
 const { actor } = await agentActor();
 console.log("status", await actor.status());
-const wOff = await actor.weights_bytes_loaded();
+const modelBytes = readFileSync(model).length;
+let wOff = await actor.weights_bytes_loaded();
+if (Number(wOff) !== modelBytes) {
+  console.log(
+    `weights size mismatch (on-chain ${wOff} vs file ${modelBytes}) — upload from offset 0`,
+  );
+  wOff = 0n;
+}
 const tOff = await actor.taesd_bytes_loaded();
 await uploadFile(actor, "upload_weights_chunk", model, wOff);
 try {

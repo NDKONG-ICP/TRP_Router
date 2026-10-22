@@ -32,7 +32,14 @@ type BeginArgs = record {
 type BeginResult = variant { ok : nat64; err : text };
 
 type StepResult = variant {
-  ok : record { step_index : nat32; instructions : nat64; wall_ms : nat64 };
+  ok : record {
+    step_index : nat32;
+    instructions : nat64;
+    wall_ms : nat64;
+    load_done : bool;
+    tensors_this_call : nat32;
+    bytes_loaded : nat64;
+  };
   err : text;
 };
 

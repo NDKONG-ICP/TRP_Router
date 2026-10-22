@@ -10,7 +10,7 @@ static void wire_status(IC_API &ic_api, const char *phase, const char *msg,
   r.append("message", CandidTypeText{std::string(msg)});
   r.append("sd_cpp_commit", CandidTypeText{std::string(kSdCppCommit)});
   std::string model_sha =
-      "d50be7655f0a554cf8041c145d88b210bd5f3c545423119dee62ae08cae51580";
+      "9ff4ce3072d47865547898947f2b4627e6153b933cca0bcb7a3c18dc614be2a5";
   r.append("model_sha256", CandidTypeOptText{model_sha});
   r.append("wasm_linked", CandidTypeBool{wasm_linked});
   ic_api.to_wire(r);
@@ -59,8 +59,10 @@ void step() {
   const uint64_t i0 = pathc_instr_start();
 
   std::string err;
+  bool load_done = false;
+  uint32_t tensors_this_call = 0;
   if (step_index == 0) {
-    if (!pathc_step_load_model(err)) {
+    if (!pathc_step_load_model(err, load_done, tensors_this_call)) {
       ic_api.to_wire(CandidTypeVariant{"err", CandidTypeText{err}});
       return;
     }
@@ -79,6 +81,9 @@ void step() {
   ok.append("step_index", CandidTypeNat32{step_index});
   ok.append("instructions", CandidTypeNat64{pathc_instr_delta(i0)});
   ok.append("wall_ms", CandidTypeNat64{pathc_now_ms() - t0});
+  ok.append("load_done", CandidTypeBool{load_done});
+  ok.append("tensors_this_call", CandidTypeNat32{tensors_this_call});
+  ok.append("bytes_loaded", CandidTypeNat64{g_weights_bytes});
   ic_api.to_wire(CandidTypeVariant{"ok", CandidTypeRecord{ok}});
 }
 

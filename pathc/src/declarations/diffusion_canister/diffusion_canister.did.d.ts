@@ -37,7 +37,10 @@ export type StepResult = {
     'ok' : {
       'instructions' : bigint,
       'step_index' : number,
+      'load_done' : boolean,
       'wall_ms' : bigint,
+      'bytes_loaded' : bigint,
+      'tensors_this_call' : number,
     }
   } |
   { 'err' : string };
