@@ -1,4 +1,4 @@
-//! OpenAI-shaped /v1/models catalog (DRAFT — capability metadata only).
+//! OpenAI-shaped /v1/models catalog (DRAFT — smoke-listed models only).
 
 #[derive(Clone, Copy)]
 pub struct ModelEntry {
@@ -28,38 +28,23 @@ pub fn catalog() -> Vec<ModelEntry> {
     push("trp/onchain-raven-art", "raven", "image", true, false, true);
     push("trp/image-standard", "trp-router", "image", false, false, true);
     push("trp/image-identity", "trp-router", "image", false, false, true);
+    push("trp/flux", "pollinations", "image", false, false, true);
 
-    // Cloudflare Workers AI (BYOK / vault keys)
-    for id in CF_LLM {
-        push(id, "cloudflare", "chat", false, true, false);
+    for id in CF_LLM_CHAT {
+        push(id, "cloudflare", "chat", false, false, false);
     }
-    for id in CF_EMBED {
-        push(id, "cloudflare", "embeddings", false, true, false);
-    }
-    for id in CF_IMAGE {
-        push(id, "cloudflare", "image", false, true, false);
-    }
-
-    // Groq (vault key; free tier at provider)
     for id in GROQ_MODELS {
-        push(id, "groq", "chat", false, true, false);
+        push(id, "groq", "chat", false, false, false);
     }
+    push("trp/gemini-2.0-flash", "google", "chat", false, false, false);
 
-    // Gemini chat (vault)
-    push("trp/gemini-2.0-flash", "google", "chat", false, true, false);
-
-    // OpenRouter free slug models (vault key)
     for id in OR_FREE {
-        push(id, "openrouter", "chat", false, true, true);
+        push(id, "openrouter", "chat", false, false, true);
     }
 
-    // Anthropic Claude (BYOK)
     for id in CLAUDE_MODELS {
         push(id, "anthropic", "chat", false, true, false);
     }
-
-    // Pollinations image (keyless)
-    push("trp/flux", "pollinations", "image", false, false, true);
 
     v
 }
@@ -78,50 +63,20 @@ pub fn models_json() -> String {
     format!(r#"{{"object":"list","data":[{}]}}"#, items.join(","))
 }
 
-const CF_LLM: &[&str] = &[
-    "trp/cf/@cf/meta/llama-3-8b-instruct",
-    "trp/cf/@cf/meta/llama-3.1-8b-instruct",
-    "trp/cf/@cf/mistral/mistral-7b-instruct-v0.2",
-    "trp/cf/@cf/mistral/mistral-7b-instruct-v0.1",
-    "trp/cf/@cf/huggingface/distilbert-sst-2-int8",
-    "trp/cf/@cf/defiant/speecht5_tts",
-    "trp/cf/@cf/openai/whisper",
-    "trp/cf/@cf/facebook/bart-large-cnn",
-    "trp/cf/@cf/microsoft/phi-2",
-    "trp/cf/@cf/qwen/qwq-32b",
-    "trp/cf/@cf/meta/llama-2-7b-chat-fp16",
-    "trp/cf/@cf/meta/llama-3.2-3b-instruct",
+/// Cloudflare Workers AI chat models (relay-routed; spot-checked subset).
+const CF_LLM_CHAT: &[&str] = &[
     "trp/cf/@cf/meta/llama-3.2-1b-instruct",
-    "trp/cf/@cf/meta/llama-3.2-11b-vision-instruct",
-    "trp/cf/@cf/meta/llama-3.3-70b-instruct-fp8-fast",
-];
-
-const CF_EMBED: &[&str] = &[
-    "trp/cf/@cf/baai/bge-base-en-v1.5",
-    "trp/cf/@cf/baai/bge-large-en-v1.5",
-    "trp/cf/@cf/google/embeddinggemma-300m",
-];
-
-const CF_IMAGE: &[&str] = &[
-    "trp/cf/@cf/black-forest-labs/flux-1-schnell",
-    "trp/cf/@cf/stabilityai/stable-diffusion-xl-base-1.0",
-    "trp/cf/@cf/bytedance/stable-diffusion-xl-lightning",
+    "trp/cf/@cf/meta/llama-3.2-3b-instruct",
+    "trp/cf/@cf/microsoft/phi-2",
 ];
 
 const GROQ_MODELS: &[&str] = &[
     "trp/groq/openai/gpt-oss-20b",
     "trp/groq/openai/gpt-oss-120b",
     "trp/groq/qwen/qwen3.8-27b",
-    "trp/groq/allam-2-7b",
 ];
 
-const OR_FREE: &[&str] = &[
-    "trp/or/meta-llama/llama-3.2-3b-instruct:free",
-    "trp/or/google/gemma-2-9b-it:free",
-    "trp/or/mistralai/mistral-7b-instruct:free",
-    "trp/or/qwen/qwen-2.5-7b-instruct:free",
-    "trp/or/deepseek/deepseek-r1-distill-llama-70b:free",
-];
+const OR_FREE: &[&str] = &["trp/or/meta-llama/llama-3.2-3b-instruct:free"];
 
 pub const CLAUDE_MODELS: &[&str] = &[
     "trp/claude-opus-5-5",
@@ -131,12 +86,11 @@ pub const CLAUDE_MODELS: &[&str] = &[
 ];
 
 pub fn anthropic_model_id(trp_id: &str) -> Option<&'static str> {
-    // TRP catalog ids → Anthropic Messages API model strings (BYOK).
     match trp_id {
-        "trp/claude-opus-5-5" => Some("claude-opus-4-20250514"),
-        "trp/claude-sonnet-5-5" => Some("claude-sonnet-4-20250514"),
-        "trp/claude-haiku-5-5" => Some("claude-3-5-haiku-20241022"),
-        "trp/claude-fable-5-1" => Some("claude-3-5-haiku-20241022"),
+        "trp/claude-opus-5-5" => Some("claude-opus-5-5"),
+        "trp/claude-sonnet-5-5" => Some("claude-sonnet-5-5"),
+        "trp/claude-haiku-5-5" => Some("claude-haiku-5-5"),
+        "trp/claude-fable-5-1" => Some("claude-fable-5-1"),
         _ => None,
     }
 }
@@ -151,4 +105,26 @@ pub fn groq_model(trp_id: &str) -> Option<&str> {
 
 pub fn or_model(trp_id: &str) -> Option<&str> {
     trp_id.strip_prefix("trp/or/")
+}
+
+/// Map TRP model id → (relay provider, upstream model id).
+pub fn relay_target(trp_id: &str) -> Option<(String, String)> {
+    if let Some(m) = groq_model(trp_id) {
+        return Some(("groq".into(), m.to_string()));
+    }
+    if CF_LLM_CHAT.contains(&trp_id) {
+        if let Some(m) = cf_run_model(trp_id) {
+            return Some(("cloudflare".into(), m.to_string()));
+        }
+    }
+    if let Some(m) = or_model(trp_id) {
+        return Some(("openrouter".into(), m.to_string()));
+    }
+    if let Some(m) = anthropic_model_id(trp_id) {
+        return Some(("anthropic".into(), m.to_string()));
+    }
+    if trp_id == "trp/gemini-2.0-flash" {
+        return Some(("gemini".into(), "gemini-2.0-flash".into()));
+    }
+    None
 }

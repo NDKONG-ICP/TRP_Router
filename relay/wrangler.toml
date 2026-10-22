@@ -1,0 +1,13 @@
+name = "trp-router-relay"
+main = "src/index.ts"
+compatibility_date = "2024-11-01"
+
+[durable_objects]
+bindings = [{ name = "INFER_DO", class_name = "InferCoordinator" }]
+
+[[migrations]]
+tag = "v1"
+new_classes = ["InferCoordinator"]
+
+[vars]
+# RELAY_SHARED_SECRET and provider keys via `wrangler secret put`

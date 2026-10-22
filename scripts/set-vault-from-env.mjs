@@ -24,7 +24,6 @@ const env = Object.fromEntries(
     }),
 );
 
-/** Candid text literal; outer shell uses single quotes so inner " are safe. */
 const opt = (v) => {
   if (!v) return "null";
   const esc = String(v).replace(/\\/g, "\\\\").replace(/"/g, '\\"');
@@ -32,6 +31,14 @@ const opt = (v) => {
 };
 
 const shellArg = (candidTuple) => `'${candidTuple.replace(/'/g, `'\\''`)}'`;
+
+if (env.RELAY_URL || env.RELAY_SHARED_SECRET) {
+  dfx(
+    `canister call router_canister set_relay_config ${shellArg(
+      `(${opt(env.RELAY_URL)}, ${opt(env.RELAY_SHARED_SECRET)})`,
+    )}`,
+  );
+}
 
 if (env.CLOUDFLARE_ACCOUNT_ID || env.CLOUDFLARE_API_TOKEN || env.GEMINI_API_KEY) {
   dfx(
@@ -47,4 +54,4 @@ if (env.GROQ_API_KEY || env.OPENROUTER_API_KEY || env.ANTHROPIC_API_KEY) {
     )}`,
   );
 }
-console.log("vault keys applied (values not logged)");
+console.log("relay + vault applied (values not logged)");

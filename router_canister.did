@@ -34,7 +34,8 @@ service : {
   set_http_transform : (principal) -> (); // legacy no-op
   transform : (record { response : record { status : nat; headers : vec record { text; text }; body : blob }; context : blob }) -> (record { status : nat; headers : vec record { text; text }; body : blob }) query;
   set_provider_keys : (opt text, opt text, opt text) -> (); // cloudflare acct, cf token, gemini (admin)
-  set_chat_vault_keys : (opt text, opt text, opt text) -> (); // groq, openrouter, anthropic vault
+  set_chat_vault_keys : (opt text, opt text, opt text) -> (); // groq, openrouter, anthropic vault (BYOK fallback)
+  set_relay_config : (opt text, opt text) -> (); // relay infer URL, RELAY_SHARED_SECRET
   set_byok_anthropic : (opt text) -> ();
   http_request_update : (HttpRequest) -> (HttpResponse);
   http_request : (HttpRequest) -> (HttpResponse) query;

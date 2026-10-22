@@ -59,16 +59,30 @@ pub async fn http_post_json(
     headers: Vec<HttpHeader>,
     body: Vec<u8>,
 ) -> Result<Vec<u8>, String> {
-    outcall_post_json(url, headers, body).await
+    outcall_post_json(url, headers, body, 2_000_000).await
 }
 
-async fn outcall_post_json(url: String, headers: Vec<HttpHeader>, body: Vec<u8>) -> Result<Vec<u8>, String> {
+/// Relay infer responses (chat JSON only).
+pub async fn http_post_json_relay(
+    url: String,
+    headers: Vec<HttpHeader>,
+    body: Vec<u8>,
+) -> Result<Vec<u8>, String> {
+    outcall_post_json(url, headers, body, 262_144).await
+}
+
+async fn outcall_post_json(
+    url: String,
+    headers: Vec<HttpHeader>,
+    body: Vec<u8>,
+    max_response_bytes: u64,
+) -> Result<Vec<u8>, String> {
     let arg = CanisterHttpRequestArgument {
         url,
         method: HttpMethod::POST,
         headers,
         body: Some(body),
-        max_response_bytes: Some(2_000_000),
+        max_response_bytes: Some(max_response_bytes),
         transform: Some(transform_ctx()),
     };
     let (resp,) = http_request(arg, TIMEOUT_NS)
@@ -109,6 +123,7 @@ async fn cloudflare(prompt: &str, keys: &ProviderKeys) -> Result<Vec<u8>, String
             },
         ],
         body.to_string().into_bytes(),
+        2_000_000,
     )
     .await?;
     if let Ok(v) = serde_json::from_slice::<serde_json::Value>(&bytes) {
@@ -158,6 +173,7 @@ async fn gemini(prompt: &str, keys: &ProviderKeys) -> Result<Vec<u8>, String> {
             value: "application/json".into(),
         }],
         body.to_string().into_bytes(),
+        2_000_000,
     )
     .await?;
     let v: serde_json::Value =

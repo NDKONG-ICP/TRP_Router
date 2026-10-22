@@ -7,6 +7,7 @@ mod moderation;
 mod onchain;
 mod payments;
 mod raven_art;
+mod relay_client;
 
 use candid::{CandidType, Deserialize, Principal};
 use ic_cdk::{api::time, caller, query, update};
@@ -68,6 +69,34 @@ thread_local! {
     static OPENROUTER_KEY: RefCell<Option<String>> = RefCell::new(None);
     static ANTHROPIC_VAULT: RefCell<Option<String>> = RefCell::new(None);
     static PROVIDER_ERRORS: RefCell<Vec<(String, String)>> = RefCell::new(Vec::new());
+    static RELAY_URL: RefCell<Option<String>> = RefCell::new(None);
+    static RELAY_SECRET: RefCell<Option<String>> = RefCell::new(None);
+    static REQ_SEQ: RefCell<u64> = RefCell::new(0);
+}
+
+fn next_req_seq() -> u64 {
+    REQ_SEQ.with(|s| {
+        let mut n = s.borrow_mut();
+        *n += 1;
+        *n
+    })
+}
+
+fn relay_config() -> Option<relay_client::RelayConfig> {
+    let url = RELAY_URL.with(|u| u.borrow().clone())?;
+    let secret = RELAY_SECRET.with(|s| s.borrow().clone())?;
+    Some(relay_client::RelayConfig {
+        infer_url: url,
+        shared_secret: secret,
+    })
+}
+
+fn public_blob_url(blob_id: &str) -> String {
+    format!(
+        "https://{}.raw.icp0.io/blob/{}",
+        ic_cdk::id().to_text(),
+        blob_id
+    )
 }
 
 fn json_response(status: u16, body: &str) -> HttpResponse {
@@ -169,6 +198,12 @@ fn set_chat_vault_keys(groq: Option<String>, openrouter: Option<String>, anthrop
     GROQ_KEY.with(|g| *g.borrow_mut() = groq);
     OPENROUTER_KEY.with(|o| *o.borrow_mut() = openrouter);
     ANTHROPIC_VAULT.with(|a| *a.borrow_mut() = anthropic);
+}
+
+#[update]
+fn set_relay_config(relay_url: Option<String>, relay_secret: Option<String>) {
+    RELAY_URL.with(|u| *u.borrow_mut() = relay_url);
+    RELAY_SECRET.with(|s| *s.borrow_mut() = relay_secret);
 }
 
 #[update]
@@ -318,12 +353,7 @@ async fn store_image_blob(bytes: Vec<u8>, provider: &str) -> HttpResponse {
         Ok(id) => id,
         Err(e) => return json_response(500, &format!(r#"{{"error":"{e}"}}"#)),
     };
-    let router_id = ic_cdk::id();
-    let url = format!(
-        "http://{}.localhost:8000/blob/{}",
-        router_id.to_text(),
-        blob_id
-    );
+    let url = public_blob_url(&blob_id);
     let body = format!(
         r#"{{"created":{},"data":[{{"url":"/blob/{blob_id}","revised_prompt":null}}],"provider":"{provider}","router_url":"{url}"}}"#,
         time()
@@ -449,7 +479,9 @@ async fn handle_chat(body: &[u8]) -> HttpResponse {
         .map(|m| (m.role.clone(), m.content.clone()))
         .collect();
     let keys = chat_keys_for_caller();
-    match chat_providers::complete(&parsed.model, &msgs, &keys).await {
+    let seq = next_req_seq();
+    let relay = relay_config();
+    match chat_providers::complete(&parsed.model, &msgs, &keys, relay, seq).await {
         Ok(text) => {
             if parsed.stream == Some(true) {
                 return sse_chat_response(&parsed.model, &text, 0, false);
