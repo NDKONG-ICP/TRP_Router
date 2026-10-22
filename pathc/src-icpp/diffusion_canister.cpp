@@ -60,10 +60,19 @@ void step() {
 
   std::string err;
   if (step_index == 0) {
+    if (!pathc_step_load_model(err)) {
+      ic_api.to_wire(CandidTypeVariant{"err", CandidTypeText{err}});
+      return;
+    }
+  } else if (step_index == 1) {
     if (!pathc_run_generate(err)) {
       ic_api.to_wire(CandidTypeVariant{"err", CandidTypeText{err}});
       return;
     }
+  } else {
+    ic_api.to_wire(CandidTypeVariant{
+        "err", CandidTypeText{"only step 0 (load) and 1 (generate) supported"}});
+    return;
   }
 
   CandidTypeRecord ok;

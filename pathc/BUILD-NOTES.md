@@ -1,7 +1,7 @@
 # Path C PoC — build notes (honest staging)
 
 **Branch:** `pathc/poc`  
-**Updated:** 2026-10-22 (C2 link + deploy)  
+**Updated:** 2026-10-22 (resume after interrupt)  
 **Verdict:** **C2 wasm LINKS** — `build/diffusion_canister.wasm` ~36 MB. **Local icpp canister deployed** (`dfx deploy` from `pathc/`). **On-chain image:** pending GGUF upload + first `generate_image` run.
 
 ## Phase A / C2 (icpp / WASI)
@@ -24,7 +24,9 @@ See `patches/vendor-icp.md` (not committed: full `vendor/stable-diffusion.cpp/` 
 
 ### Upload
 
-- **Do not** use `dfx canister call` with megabyte `vec { … }` (argv limit). Use `node pathc/scripts/upload_model.mjs` (`@dfinity/agent`, 1.9 MB chunks, host `dfx info webserver-port` → 4943).
+- **Do not** use `dfx canister call` with megabyte `vec { … }` (argv limit). Use `node pathc/scripts/upload_model.mjs` (`@dfinity/agent`, 1.9 MB chunks, port 4943).
+- **Redeploy / upgrade wipes VFS** — re-run upload after `dfx deploy`. Keep replica up: `TERM=xterm-256color script -q /dev/null bash -c 'cd pathc && dfx start'` (Cursor `TERM=dumb` panics dfx; use `pathc/scripts/dfx.sh`).
+- **Instruction limit:** `step(0)` = `new_sd_ctx` only; `step(1)` = `generate_image` + PNG. Combined load+gen exceeded 40B/update (measured 2026-10-22).
 
 ### Phase B–E (in progress)
 

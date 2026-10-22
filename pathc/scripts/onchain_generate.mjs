@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { createHash } from "crypto";
-import { writeFileSync } from "fs";
-import { execSync } from "child_process";
+import { writeFileSync, readFileSync, existsSync } from "fs";
+import { homedir } from "os";
 import { join, dirname } from "path";
 import { fileURLToPath } from "url";
 import { HttpAgent, Actor } from "@dfinity/agent";
@@ -12,26 +12,49 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const root = join(__dirname, "..");
 const NET = process.env.DFX_NETWORK || "local";
 
-const dfx = (cmd) =>
-  execSync(`dfx ${cmd} --network ${NET}`, {
-    cwd: root,
-    encoding: "utf8",
-    env: { ...process.env, NO_COLOR: "1" },
-  }).trim();
+function readEnvPathc() {
+  const p = join(root, ".env.pathc");
+  if (!existsSync(p)) return {};
+  const out = {};
+  for (const line of readFileSync(p, "utf8").split("\n")) {
+    const m = line.match(/^([A-Z_]+)=['"]?([^'"]+)['"]?/);
+    if (m) out[m[1]] = m[2];
+  }
+  return out;
+}
+
+function defaultIdentityName() {
+  const cfg = join(homedir(), ".config/dfx/identity.json");
+  if (existsSync(cfg)) {
+    try {
+      return JSON.parse(readFileSync(cfg, "utf8")).default;
+    } catch {
+      /* ignore */
+    }
+  }
+  return "default";
+}
+
+function loadIdentityPem() {
+  const name = process.env.DFX_IDENTITY || defaultIdentityName();
+  const pemPath = join(homedir(), ".config/dfx/identity", name, "identity.pem");
+  if (!existsSync(pemPath)) {
+    throw new Error(`Missing identity PEM: ${pemPath}`);
+  }
+  return readFileSync(pemPath, "utf8");
+}
 
 async function actor() {
-  const canisterId = dfx("canister id diffusion_canister");
-  const whoami = dfx("identity whoami");
-  const pem = execSync(`dfx identity export ${whoami}`, {
-    cwd: root,
-    encoding: "utf8",
-  });
+  const envFile = readEnvPathc();
+  const canisterId =
+    process.env.CANISTER_ID_DIFFUSION_CANISTER ||
+    envFile.CANISTER_ID_DIFFUSION_CANISTER;
+  if (!canisterId) throw new Error("Missing CANISTER_ID in .env.pathc");
+  const pem = loadIdentityPem();
   const identity = Secp256k1KeyIdentity.fromPem(pem);
   const host =
     process.env.DFX_HOST ||
-    (NET === "ic"
-      ? "https://icp0.io"
-      : `http://127.0.0.1:${dfx("info webserver-port")}`);
+    (NET === "ic" ? "https://icp0.io" : "http://127.0.0.1:4943");
   const agent = new HttpAgent({ host, identity });
   if (NET !== "ic") await agent.fetchRootKey();
   return Actor.createActor(idlFactory, { agent, canisterId });
@@ -46,9 +69,12 @@ async function runOnce(a, label) {
   console.log(label, "begin");
   const b = await a.begin({ prompt, seed, steps: 1, width: w, height: h });
   if (b.err) throw new Error(String(b.err));
-  const st = await a.step(0);
-  console.log(label, "step", st);
-  if (st.err) throw new Error(String(st.err));
+  const st0 = await a.step(0);
+  console.log(label, "step0 load", st0);
+  if (st0.err) throw new Error(String(st0.err));
+  const st1 = await a.step(1);
+  console.log(label, "step1 generate", st1);
+  if (st1.err) throw new Error(String(st1.err));
   const fin = await a.finish();
   console.log(label, "finish", fin);
   if (fin.err) throw new Error(String(fin.err));

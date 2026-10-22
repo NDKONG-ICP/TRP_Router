@@ -86,6 +86,10 @@ bool pathc_ensure_sd_ctx(std::string &err) {
   return true;
 }
 
+bool pathc_step_load_model(std::string &err) {
+  return pathc_ensure_sd_ctx(err);
+}
+
 bool pathc_run_generate(std::string &err) {
   if (!g_session.active) {
     err = "call begin first";

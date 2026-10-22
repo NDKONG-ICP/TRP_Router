@@ -47,4 +47,5 @@ void pathc_push_timing(const std::string &stage, uint64_t instr,
 std::string pathc_sha256_hex(const std::vector<uint8_t> &data);
 
 bool pathc_ensure_sd_ctx(std::string &err);
+bool pathc_step_load_model(std::string &err);
 bool pathc_run_generate(std::string &err);
