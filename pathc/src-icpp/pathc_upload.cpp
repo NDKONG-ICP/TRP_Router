@@ -2,25 +2,31 @@
 #include "pathc_internal.h"
 #include "pathc_stable.h"
 
-#include <fstream>
+#include <cstdio>
 #include <string>
 
 static bool write_chunk(const std::string &path, uint64_t offset,
                         const std::vector<uint8_t> &chunk, std::string &err) {
-  std::ios_base::openmode mode = std::ios::binary;
-  if (offset == 0) {
-    mode |= std::ios::trunc;
+  const char *mode = (offset == 0) ? "wb" : "r+b";
+  FILE *f = std::fopen(path.c_str(), mode);
+  if (f == nullptr && offset > 0) {
+    f = std::fopen(path.c_str(), "w+b");
   }
-  std::ofstream out(path, mode);
-  if (!out.is_open()) {
-    err = "failed to open " + path;
+  if (f == nullptr) {
+    err = "failed to fopen " + path;
     return false;
   }
-  out.seekp(static_cast<std::streamoff>(offset));
-  out.write(reinterpret_cast<const char *>(chunk.data()),
-              static_cast<std::streamsize>(chunk.size()));
-  if (!out) {
-    err = "short write " + path;
+  if (std::fseek(f, static_cast<long>(offset), SEEK_SET) != 0) {
+    std::fclose(f);
+    err = "fseek failed " + path;
+    return false;
+  }
+  const size_t n =
+      std::fwrite(chunk.data(), 1, chunk.size(), f);
+  std::fflush(f);
+  std::fclose(f);
+  if (n != chunk.size()) {
+    err = "short fwrite " + path;
     return false;
   }
   return true;
