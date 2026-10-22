@@ -61,36 +61,46 @@ async function actor() {
 }
 
 async function runOnce(a, label) {
-  const prompt = process.env.PATHC_PROMPT || "a raven, pixel art";
-  const seed = BigInt(process.env.PATHC_SEED || 42);
-  const w = Number(process.env.PATHC_WIDTH || 128);
-  const h = Number(process.env.PATHC_HEIGHT || 128);
+  const prompt =
+    process.env.PATHC_PROMPT || "a black raven on a branch, silhouette, minimal";
+  const seed = BigInt(process.env.PATHC_SEED || 4242);
+  const w = Number(process.env.PATHC_WIDTH || 64);
+  const h = Number(process.env.PATHC_HEIGHT || 64);
 
-  console.log(label, "begin");
+  console.log(label, "begin", { w, h, seed: seed.toString() });
   const b = await a.begin({ prompt, seed, steps: 1, width: w, height: h });
   if (b.err) throw new Error(String(b.err));
   const st0 = await a.step(0);
-  console.log(label, "step0 load", st0);
+  console.log(label, "step0 load", JSON.stringify(st0, (_, v) => (typeof v === "bigint" ? v.toString() : v)));
   if (st0.err) throw new Error(String(st0.err));
   const st1 = await a.step(1);
-  console.log(label, "step1 generate", st1);
+  console.log(label, "step1 generate", JSON.stringify(st1, (_, v) => (typeof v === "bigint" ? v.toString() : v)));
   if (st1.err) throw new Error(String(st1.err));
   const fin = await a.finish();
-  console.log(label, "finish", fin);
+  console.log(label, "finish", JSON.stringify(fin, (_, v) => (typeof v === "bigint" ? v.toString() : v)));
   if (fin.err) throw new Error(String(fin.err));
   const pngRes = await a.get_png();
   if (pngRes.err) throw new Error(String(pngRes.err));
-  const png = Buffer.from(pngRes.ok);
-  return png;
+  return Buffer.from(pngRes.ok);
 }
 
 const a = await actor();
+console.log("weights", (await a.weights_bytes_loaded()).toString());
 console.log("status", await a.status());
 const png = await runOnce(a, "run1");
 const out = join(root, "tmp/onchain-0.png");
 writeFileSync(out, png);
-console.log("Wrote", out, png.length, "sha256", createHash("sha256").update(png).digest("hex"));
-console.log("timings", await a.last_timings());
+const sha = createHash("sha256").update(png).digest("hex");
+console.log("Wrote", out, png.length, "sha256", sha);
+const timings = await a.last_timings();
+console.log("timings", JSON.stringify(timings, (_, v) => (typeof v === "bigint" ? v.toString() : v)));
+writeFileSync(
+  join(root, "tmp/onchain-timings.json"),
+  JSON.stringify({ png_sha256: sha, png_bytes: png.length, timings }, (_, v) =>
+    typeof v === "bigint" ? v.toString() : v,
+  ),
+);
 
 const png2 = await runOnce(a, "run2");
-console.log("deterministic", png.equals(png2));
+const sha2 = createHash("sha256").update(png2).digest("hex");
+console.log("deterministic", sha === sha2, "sha2", sha2);

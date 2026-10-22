@@ -1,52 +1,51 @@
 # Path C PoC — build notes (honest staging)
 
 **Branch:** `pathc/poc`  
-**Updated:** 2026-10-22 (resume after interrupt)  
-**Verdict:** **C2 wasm LINKS** — `build/diffusion_canister.wasm` ~36 MB. **Local icpp canister deployed** (`dfx deploy` from `pathc/`). **On-chain image:** pending GGUF upload + first `generate_image` run.
+**Updated:** 2026-10-22 (C3 upload done, C4 load blocked)  
+**Verdict:** **C2 GO** (wasm links + deploy). **C4 NO-GO** — `step(0)` `new_sd_ctx` on 2 GB q8_0 exceeds **40B instructions/update** on local replica. **No `onchain-0.png`.**
 
-## Phase A / C2 (icpp / WASI)
-
-### What works
+## Done
 
 | Item | Status |
 |------|--------|
-| **once_flag / libc++** | Universal `-include wasi-shims/icp_preamble.h` via `scripts/gen-icpp-config.py` on `cpp_compile_flags` + `cpp_compile_flags_defaults` (icpp runtime TUs). Clean rebuild clears `build-library/`. |
-| **Space-free build root** | `pathc/scripts/build-icpp.sh` → `/tmp/trp-pathc-nospace` |
-| **icpp recipe** | `pathc/icpp.toml` — sd.cpp + ggml CPU + onig + utf8proc + zip |
-| **WASI shims** | `pathc/wasi-shims/` (mutex, thread, future, condition_variable, `icp_preamble.h`) |
-| **Candid exports** | `src-icpp/diffusion_canister.h` — `WASM_SYMBOL_EXPORTED("canister_query …")` / `canister_update …` |
-| **Host C3** | SD-Turbo q8_0 + TAESD; `tmp/reference-cpu-0.png`; timings in `BENCHMARKS.md` |
-| **Deploy** | `pathc/dfx.json` custom canister → `build/diffusion_canister.wasm` |
+| icpp wasm | Links ~36 MB; universal `icp_preamble.h`; Candid exports |
+| Local canister | `uxrrr-q7777-77774-qaaaq-cai` |
+| Full weights on canister | **2 023 745 376** B GGUF + TAESD via `node pathc/scripts/upload_model.mjs` (resume + cycle fabricate) |
+| VFS survives **code upgrade** | Verified: after `dfx deploy` upgrade, `weights_bytes_loaded` = 2 023 745 376 without re-upload |
+| Step split | `step(0)` load, `step(1)` generate; scripts default **64×64** |
+| Commits | Phase A, C2, step-split (`86eaeac`) |
 
-### Vendor patches (sd.cpp @ `a77d362…`)
+## Storage (honest)
 
-See `patches/vendor-icp.md` (not committed: full `vendor/stable-diffusion.cpp/` tree).
+- Uploads land on **WASI VFS** files (`model.gguf`, `taesd.safetensors`), not yet **`ic0` stable memory** / `gguf_init_from_buffer` from stable.
+- **`pathc_refresh_vfs_sizes()`** syncs byte counters from VFS after upgrade.
 
-### Upload
+## Blocker (exact)
 
-- **Do not** use `dfx canister call` with megabyte `vec { … }` (argv limit). Use `node pathc/scripts/upload_model.mjs` (`@dfinity/agent`, 1.9 MB chunks, port 4943).
-- **Redeploy / upgrade wipes VFS** — re-run upload after `dfx deploy`. Keep replica up: `TERM=xterm-256color script -q /dev/null bash -c 'cd pathc && dfx start'` (Cursor `TERM=dumb` panics dfx; use `pathc/scripts/dfx.sh`).
-- **Instruction limit:** `step(0)` = `new_sd_ctx` only; `step(1)` = `generate_image` + PNG. Combined load+gen exceeded 40B/update (measured 2026-10-22).
-
-### Phase B–E (in progress)
-
-- Chunked GGUF → VFS `model.gguf` / `taesd.safetensors` (`upload_*_chunk`).
-- `begin` / `step` / `finish` → `generate_image` (CPU RNG, 128×128 default).
-- `pathc/tmp/onchain-0.png`, `BENCHMARKS.md` on-chain table, determinism.
-
-## Build commands
-
-```bash
-pathc/scripts/build-icpp.sh
-cd pathc && dfx deploy diffusion_canister --network local -y
-node ../pathc/scripts/upload_model.mjs   # from trp-router (node_modules)
-node ../pathc/scripts/onchain_generate.mjs
+```
+step(0) → new_sd_ctx → StableDiffusionGGML::init → apply_model_update → build_runners
+Reject: Canister exceeded the limit of 40000000000 instructions for single message execution
 ```
 
-## GO / NO-GO
+Tried: `enable_mmap=true`, `eager_load=false`, `disable_prefetch=true`. Still traps before context is ready.
 
-| Milestone | Verdict |
-|-----------|---------|
-| **C2 link** | **GO** — wasm links, deploys, `status` query OK |
-| **M2 on-chain image** | **PENDING** — upload + inference |
-| **M3 shard** | **NO-GO** — out of scope for PoC |
+**Fix direction:** Vendor patch (see `patches/vendor-icp.md`) — resumable `ModelManager` tensor load with instruction budget per update; persist loader cursor in canister stable memory between `step(0)` calls.
+
+## Ops
+
+- **dfx in Cursor:** `TERM=dumb` panics dfx → use `pathc/scripts/dfx.sh` or `TERM=xterm-256color script -q /dev/null bash -c '… dfx …'`.
+- **Cycles:** `dfx ledger fabricate-cycles --t … --canister diffusion_canister` (local only).
+- **Minimize redeploys:** prefer wasm upgrade only; VFS weights retained in current PoC.
+
+## Commands
+
+```bash
+# Replica (keep running)
+TERM=xterm-256color script -q /dev/null bash -c 'cd pathc && dfx start'
+
+# Upload (resume-aware)
+node pathc/scripts/upload_model.mjs
+
+# Inference (blocked at load today)
+PATHC_WIDTH=64 PATHC_HEIGHT=64 node pathc/scripts/onchain_generate.mjs
+```

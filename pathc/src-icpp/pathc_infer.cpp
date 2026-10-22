@@ -16,6 +16,17 @@ std::vector<uint8_t> g_png;
 
 bool g_generated = false;
 
+void pathc_refresh_vfs_sizes() {
+  std::ifstream gguf(kModelGgufPath, std::ios::binary | std::ios::ate);
+  if (gguf.is_open()) {
+    g_weights_bytes = static_cast<uint64_t>(gguf.tellg());
+  }
+  std::ifstream taesd(kTaesdPath, std::ios::binary | std::ios::ate);
+  if (taesd.is_open()) {
+    g_taesd_bytes = static_cast<uint64_t>(taesd.tellg());
+  }
+}
+
 uint64_t pathc_now_ms() { return IC_API::time() / 1'000'000; }
 
 uint64_t pathc_instr_start() {
@@ -50,6 +61,7 @@ bool pathc_ensure_sd_ctx(std::string &err) {
   if (g_sd_ctx != nullptr) {
     return true;
   }
+  pathc_refresh_vfs_sizes();
   if (g_weights_bytes == 0) {
     err = "model.gguf not uploaded";
     return false;
@@ -72,7 +84,9 @@ bool pathc_ensure_sd_ctx(std::string &err) {
   params.n_threads = 1;
   params.rng_type = CPU_RNG;
   params.sampler_rng_type = CPU_RNG;
-  params.enable_mmap = false;
+  params.enable_mmap = true;
+  params.eager_load = false;
+  params.disable_prefetch = true;
   params.wtype = SD_TYPE_COUNT; // auto
 
   g_sd_ctx = new_sd_ctx(&params);

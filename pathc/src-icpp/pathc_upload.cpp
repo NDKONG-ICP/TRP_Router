@@ -65,10 +65,12 @@ void upload_taesd_chunk() {
 
 void weights_bytes_loaded() {
   IC_API ic_api(CanisterQuery{std::string(__func__)}, false);
+  pathc_refresh_vfs_sizes();
   ic_api.to_wire(CandidTypeNat64{g_weights_bytes});
 }
 
 void taesd_bytes_loaded() {
   IC_API ic_api(CanisterQuery{std::string(__func__)}, false);
+  pathc_refresh_vfs_sizes();
   ic_api.to_wire(CandidTypeNat64{g_taesd_bytes});
 }
