@@ -6,9 +6,12 @@ Files under `vendor/stable-diffusion.cpp/`:
 - `src/model_io/safetensors_io.cpp` — `.string()` instead of `.u8string()` on WASI
 - `src/model_loader.cpp` — `#ifdef __wasi__` force `n_threads = 1`
 
-## Planned (C4 — instruction-bounded load)
+## C4 — instruction-bounded load (applied under `TRP_PATHC_ICP`)
 
-- **`ModelManager` / `StableDiffusionGGML::init`:** resume tensor materialization across updates; cap instructions per `step(0)`; persist loader cursor in stable memory.
-- Optional: **`gguf_init_from_buffer`** from stable blob instead of VFS `fopen` path.
+- **`model_loader.cpp`:** after each tensor, check `pathc_icp_budget_exceeded()` → pause with partial return.
+- **`model_manager.cpp`:** treat pause as partial success (no storage teardown).
+- **`diffusion_engine.cpp`:** `pathc_init_incomplete_` + resume via `validate_and_load_runners()` on next `init()`.
+- **`pathc_icp_hooks.*`:** 35B instruction budget per update call.
+- **Upload:** dual-write chunks to `ic0` stable + VFS `model.gguf` (buffer-only load: TODO `gguf_init_from_buffer`).
 
 Re-apply after vendor bump or keep a fork branch.

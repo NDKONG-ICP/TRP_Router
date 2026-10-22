@@ -8,8 +8,9 @@
 | **wasi-sdk** | wasi-sdk-25.0 (via `~/.icpp/wasi-sdk`) |
 | **stable-diffusion.cpp** | `a77d3623180b2bc1886f3dd04c0aa04156a987ef` (vendor clone 2026-10-22) |
 | **ggml (submodule)** | `dc998771e700d49bbdf9a39cede22bb5b3311767` |
-| **Model (C3)** | [Green-Sky/SD-Turbo-GGUF](https://huggingface.co/Green-Sky/SD-Turbo-GGUF) `sd_turbo-f16-q8_0.gguf` |
-| **Model SHA-256** | `d50be7655f0a554cf8041c145d88b210bd5f3c545423119dee62ae08cae51580` |
+| **Model (C3 host ref q8)** | [Green-Sky/SD-Turbo-GGUF](https://huggingface.co/Green-Sky/SD-Turbo-GGUF) `sd_turbo-f16-q8_0.gguf` → SHA `d50be7655f0a554cf8041c145d88b210bd5f3c545423119dee62ae08cae51580` |
+| **Model (on-chain PoC q4)** | `models/sd_turbo-f16-q4_0.gguf` (sd-cli `-M convert --type q4_0` from q8 host file) |
+| **Model SHA-256 (q4)** | `9ff4ce3072d47865547898947f2b4627e6153b933cca0bcb7a3c18dc614be2a5` (~1.6 GB) |
 | **TAESD** | [madebyollin/taesd](https://huggingface.co/madebyollin/taesd) `diffusion_pytorch_model.safetensors` → `models/taesd.safetensors` |
 | **TAESD SHA-256** | `db169d69145ec4ff064e49d99c95fa05d3eb04ee453de35824a6d0f325513549` |
 | **Reference** | `trp-router/vendor/llama_cpp_canister` + upstream clone `onicai/llama_cpp_canister` @ main (icpp.toml template) |
