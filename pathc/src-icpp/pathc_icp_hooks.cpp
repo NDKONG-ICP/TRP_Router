@@ -128,6 +128,34 @@ bool pathc_icp_graph_pause_active() {
   return g_graph_resume_target != nullptr && g_suspended_runner != nullptr;
 }
 
+bool pathc_icp_should_defer_runner_teardown(const GGMLRunner* runner) {
+  if (pathc_icp_infer_pause_requested()) {
+    return true;
+  }
+  if (pathc_icp_peek_resume_graph() != nullptr) {
+    return true;
+  }
+  if (runner == nullptr) {
+    return pathc_icp_peek_suspended_runner() != nullptr;
+  }
+  if (pathc_icp_peek_suspended_runner() == runner) {
+    return true;
+  }
+  if (runner->pathc_compute_suspended()) {
+    return true;
+  }
+  if (runner->graph_active()) {
+    return true;
+  }
+  return false;
+}
+
+PathcRunnerEndOnExit::~PathcRunnerEndOnExit() {
+  if (runner != nullptr && !pathc_icp_should_defer_runner_teardown(runner)) {
+    runner->runner_end();
+  }
+}
+
 bool pathc_icp_graph_eval_callback(ggml_tensor* t, bool ask, void* user_data) {
   (void)user_data;
   // Force one graph node per batch so we can pause between nodes (avoid running

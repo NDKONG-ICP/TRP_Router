@@ -64,6 +64,14 @@ void pathc_icp_set_suspended_runner(GGMLRunner* runner);
 GGMLRunner* pathc_icp_peek_suspended_runner();
 void pathc_icp_clear_suspended_runner();
 bool pathc_icp_graph_pause_active();
+/** True → do not runner_end / free compute_ctx (infer graph paused mid-forward). */
+bool pathc_icp_should_defer_runner_teardown(const GGMLRunner* runner);
+
+/** RAII: calls runner->runner_end() unless infer pause / suspended graph. */
+struct PathcRunnerEndOnExit {
+  GGMLRunner* runner = nullptr;
+  ~PathcRunnerEndOnExit();
+};
 
 #else
 
