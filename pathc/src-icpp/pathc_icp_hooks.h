@@ -59,6 +59,12 @@ bool pathc_icp_run_graph_chunked(ggml_backend_t backend, ggml_cgraph* graph,
                                  PathcGraphChunkState* state);
 void pathc_icp_note_graph_pause(ggml_cgraph* graph, int next_node);
 
+class GGMLRunner;
+void pathc_icp_set_suspended_runner(GGMLRunner* runner);
+GGMLRunner* pathc_icp_peek_suspended_runner();
+void pathc_icp_clear_suspended_runner();
+bool pathc_icp_graph_pause_active();
+
 #else
 
 inline void pathc_icp_reset_call(uint64_t = 0) {}

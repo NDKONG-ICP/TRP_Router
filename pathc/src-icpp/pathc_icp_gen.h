@@ -32,12 +32,25 @@ bool pathc_icp_gen_try_resume(sd::pipeline::ImageGenerationLatents& latents,
                               sd::pipeline::SamplePlan& plan,
                               RefImageParams& ref_image_params,
                               int64_t& t0);
-void pathc_icp_gen_save_after_embeds(sd::pipeline::ImageGenerationLatents latents,
-                                     sd::pipeline::ImageGenerationEmbeds embeds,
+void pathc_icp_gen_save_after_embeds(const sd::pipeline::ImageGenerationLatents& latents,
+                                     const sd::pipeline::ImageGenerationEmbeds& embeds,
                                      sd::pipeline::GenerationRequest request,
                                      sd::pipeline::SamplePlan plan,
                                      RefImageParams ref_image_params,
                                      int64_t t0);
+
+bool pathc_icp_gen_has_condition_snapshot();
+void pathc_icp_gen_save_in_condition(sd::pipeline::ImageGenerationLatents latents,
+                                     sd::pipeline::GenerationRequest request,
+                                     sd::pipeline::SamplePlan plan,
+                                     RefImageParams ref_image_params,
+                                     int64_t t0);
+bool pathc_icp_gen_take_condition_snapshot(sd::pipeline::ImageGenerationLatents& latents,
+                                           sd::pipeline::GenerationRequest& request,
+                                           sd::pipeline::SamplePlan& plan,
+                                           RefImageParams& ref_image_params,
+                                           int64_t& t0);
+void pathc_icp_gen_abort_suspended();
 
 #else
 

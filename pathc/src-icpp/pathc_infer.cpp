@@ -262,7 +262,11 @@ bool pathc_run_generate(std::string &err, bool &generate_done) {
                   iparams.height, static_cast<long long>(iparams.seed));
 #endif
   const bool ok =
+#ifdef TRP_PATHC_ICP
+      pathc_generate_image_step(g_sd_ctx, &iparams, &images, &num_images);
+#else
       generate_image(g_sd_ctx, &iparams, &images, &num_images);
+#endif
 #ifdef TRP_PATHC_ICP
   pathc_icp_dbgf("PATHC generate_image ok=%d num=%d\n", ok ? 1 : 0, num_images);
 #endif

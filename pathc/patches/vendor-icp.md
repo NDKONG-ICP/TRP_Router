@@ -24,6 +24,9 @@ Files under `vendor/stable-diffusion.cpp/`:
 - **`pipeline/generation.h`:** skip `ConditionerRunnerEndOnExit` when pause/resume graph active.
 - **`pipeline/image.cpp`:** phase cursor (`PathcGenPhase`); embed stash without forced pause; pause-aware embed failure.
 - **`conditioning/conditioner.hpp`:** return empty condition/tensor on pause (no `GGML_ASSERT` trap mid-CLIP).
+- **`ggml_runner.cpp`:** `pathc_compute_suspended_` keeps `graph_active_` + `compute_ctx` on pause; `pathc_resume_paused_compute()` / `pathc_abort_suspended_session()`.
+- **`pathc_icp_gen` + `pathc_generate_image_step`:** condition snapshot; step(1) resumes graph slices without full `generate_image` restart.
+- **`ggml-backend.cpp`:** pause/resume uses `pathc_root_graph` (segment graph), not sched copy.
 - **Upload:** POSIX `open`/`write`/`O_APPEND` chunked VFS writes (`model.gguf`).
 - **`gguf_io.cpp`:** on ICP, `read_gguf_file` uses `gguf_init_from_file` only (skip `GGUFReader` ifstream).
 

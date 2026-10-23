@@ -3,6 +3,7 @@
 #ifdef TRP_PATHC_ICP
 
 #include "core/ggml_extend_backend.h"
+#include "core/ggml_runner.h"
 #include "ggml.h"
 #include "ic_api.h"
 
@@ -19,6 +20,7 @@ static std::string g_last_load_error;
 static bool g_infer_pause = false;
 static ggml_cgraph* g_graph_resume_target = nullptr;
 static int g_graph_resume_node = 0;
+static GGMLRunner* g_suspended_runner = nullptr;
 
 const char* pathc_icp_last_load_error() {
   return g_last_load_error.empty() ? nullptr : g_last_load_error.c_str();
@@ -113,6 +115,18 @@ void pathc_icp_graph_clear_resume() {
 }
 
 ggml_cgraph* pathc_icp_peek_resume_graph() { return g_graph_resume_target; }
+
+void pathc_icp_set_suspended_runner(GGMLRunner* runner) {
+  g_suspended_runner = runner;
+}
+
+GGMLRunner* pathc_icp_peek_suspended_runner() { return g_suspended_runner; }
+
+void pathc_icp_clear_suspended_runner() { g_suspended_runner = nullptr; }
+
+bool pathc_icp_graph_pause_active() {
+  return g_graph_resume_target != nullptr && g_suspended_runner != nullptr;
+}
 
 bool pathc_icp_graph_eval_callback(ggml_tensor* t, bool ask, void* user_data) {
   (void)user_data;
