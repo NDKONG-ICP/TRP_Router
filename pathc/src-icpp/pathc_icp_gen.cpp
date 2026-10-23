@@ -49,6 +49,7 @@ std::optional<sd::Tensor<float>> g_pending_unet_output;
 std::optional<sd::Tensor<float>> g_pending_vae_output;
 std::optional<sd::Tensor<float>> g_denoise_x_t_stash;
 uint32_t g_graph_slices_phase = 0;
+bool g_condition_clip_graph_finished = false;
 
 }  // namespace
 
@@ -72,6 +73,7 @@ void pathc_icp_gen_reset() {
   g_pending_vae_output.reset();
   g_denoise_x_t_stash.reset();
   g_graph_slices_phase = 0;
+  g_condition_clip_graph_finished = false;
   g_phase = PathcGenPhase::Idle;
 }
 
@@ -96,7 +98,9 @@ void pathc_icp_gen_save_after_embeds(const sd::pipeline::ImageGenerationLatents&
   g_phase = PathcGenPhase::Denoise;
   g_cond_stash.reset();
   g_prompt_cond_stash.reset();
+  g_condition_clip_graph_finished = false;
   pathc_icp_gen_reset_graph_slice_count();
+  pathc_icp_graph_clear_resume_force();
   pathc_icp_dbg("PATHC enter Denoise (embeds stashed)\n");
   if (pathc_parity_capture_embeds()) {
     pathc_parity_capture_embeds_bundle(embeds, pathc_parity_meta_from_session(0.f));
@@ -296,5 +300,17 @@ uint32_t pathc_icp_gen_graph_slices_this_phase() { return g_graph_slices_phase; 
 void pathc_icp_gen_reset_graph_slice_count() { g_graph_slices_phase = 0; }
 
 void pathc_icp_gen_inc_graph_slice_count() { g_graph_slices_phase++; }
+
+void pathc_icp_gen_set_condition_clip_graph_finished(bool finished) {
+  g_condition_clip_graph_finished = finished;
+}
+
+bool pathc_icp_gen_condition_clip_graph_finished() {
+  return g_condition_clip_graph_finished;
+}
+
+void pathc_icp_gen_clear_condition_clip_graph_finished() {
+  g_condition_clip_graph_finished = false;
+}
 
 #endif

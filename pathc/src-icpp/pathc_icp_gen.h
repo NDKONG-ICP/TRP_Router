@@ -91,6 +91,11 @@ void pathc_icp_gen_reset_graph_slice_count();
 void pathc_icp_gen_inc_graph_slice_count();
 void pathc_icp_gen_abort_suspended();
 
+/** CLIP text-encoder graph reached n_nodes (prompt forward done; finish embeds next). */
+void pathc_icp_gen_set_condition_clip_graph_finished(bool finished);
+bool pathc_icp_gen_condition_clip_graph_finished();
+void pathc_icp_gen_clear_condition_clip_graph_finished();
+
 #else
 
 inline void pathc_icp_gen_reset() {}

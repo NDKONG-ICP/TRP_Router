@@ -20,7 +20,8 @@ Files under `vendor/stable-diffusion.cpp/`:
 - **`pathc_icp_hooks.*`:** `kPathcInferInstrBudget` ≈ 35×10⁹; `pathc_icp_run_graph_chunked()`; eval callback forces **one node per batch** (`ask` → true); `pathc_icp_note_graph_pause()`.
 - **`ggml_extend_backend.cpp`:** chunked eval + resume node cursor (direct CPU backend path).
 - **`ggml/src/ggml-backend.cpp`:** sched eval loop: resume `j0`, return `GGML_STATUS_ABORTED` on infer pause; when resume cursor ≥ `n_nodes`, treat graph complete (no 0-slice replay).
-- **`pathc_icp_hooks.*`:** when resume cursor reaches end of graph, clear cursor + infer pause (phase handoff); do not keep `mid_graph_suspend` true after last CLIP node.
+- **`pathc_icp_hooks.*` + `pathc_icp_gen.*`:** when Condition-phase CLIP graph hits `n_nodes`, set `condition_clip_graph_finished`, read CLIP output without cursor replay, then `save_after_embeds` → **Denoise** (fresh resume cursor for UNet).
+- **`ggml_runner.cpp`:** `pathc_read_and_teardown_completed_graph()` when resume cursor cleared at graph end; do not abort/replay from node 0.
 - **`ggml_runner.cpp`:** skip `runner_end` on infer pause; sched `ABORTED` → segment pause; keep `compute_ctx` via existing `GraphEndGuard`.
 - **`pipeline/generation.h`:** skip `ConditionerRunnerEndOnExit` when pause/resume graph active.
 - **`pipeline/image.cpp`:** phase cursor (`PathcGenPhase`); embed stash without forced pause; pause-aware embed failure.
