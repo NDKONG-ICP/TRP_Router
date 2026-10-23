@@ -98,7 +98,40 @@ void pathc_icp_request_infer_pause() { g_infer_pause = true; }
 bool pathc_icp_infer_pause_requested() { return g_infer_pause; }
 void pathc_icp_clear_infer_pause() { g_infer_pause = false; }
 
+void pathc_icp_graph_clear_resume_force();
+
+static void pathc_icp_mark_graph_run_complete(ggml_cgraph* graph) {
+  if (g_graph_resume_target != nullptr && graph != nullptr &&
+      g_graph_resume_target != graph) {
+    return;
+  }
+  ggml_cgraph* g = g_graph_resume_target != nullptr ? g_graph_resume_target : graph;
+  if (g != nullptr) {
+    pathc_icp_dbgf("PATHC graph run complete (cursor=%d n_nodes=%d)\n",
+                    g_graph_resume_node, ggml_graph_n_nodes(g));
+  } else {
+    pathc_icp_dbg("PATHC graph run complete\n");
+  }
+  pathc_icp_graph_clear_resume_force();
+  pathc_icp_clear_infer_pause();
+}
+
+static bool pathc_icp_graph_cursor_past_end(const ggml_cgraph* graph) {
+  if (g_graph_resume_target == nullptr) {
+    return false;
+  }
+  if (graph != nullptr && g_graph_resume_target != graph) {
+    return false;
+  }
+  return g_graph_resume_node >=
+         ggml_graph_n_nodes(g_graph_resume_target);
+}
+
 void pathc_icp_graph_set_resume(ggml_cgraph* graph, int next_node) {
+  if (graph != nullptr && next_node >= ggml_graph_n_nodes(graph)) {
+    pathc_icp_mark_graph_run_complete(graph);
+    return;
+  }
   g_graph_resume_target = graph;
   g_graph_resume_node = next_node;
 }
@@ -134,6 +167,11 @@ void pathc_icp_checkpoint_graph_progress(const ggml_cgraph* graph,
     return;
   }
   const int next = last + 1;
+  const int n_nodes = ggml_graph_n_nodes(const_cast<ggml_cgraph*>(graph));
+  if (next >= n_nodes) {
+    pathc_icp_mark_graph_run_complete(const_cast<ggml_cgraph*>(graph));
+    return;
+  }
   if (g_graph_resume_target != graph) {
     pathc_icp_graph_set_resume(const_cast<ggml_cgraph*>(graph), next);
   } else if (next > g_graph_resume_node) {
@@ -175,6 +213,9 @@ GGMLRunner* pathc_icp_peek_suspended_runner() { return g_suspended_runner; }
 void pathc_icp_clear_suspended_runner() { g_suspended_runner = nullptr; }
 
 bool pathc_icp_mid_graph_suspend(const GGMLRunner* runner) {
+  if (pathc_icp_graph_cursor_past_end(nullptr)) {
+    pathc_icp_mark_graph_run_complete(nullptr);
+  }
   if (g_graph_resume_target != nullptr) {
     return true;
   }
@@ -211,6 +252,12 @@ extern "C" bool pathc_icp_no_intermediate_galloc_reuse(void) {
 
 void pathc_icp_enter_graph_suspend(ggml_cgraph* graph, int next_node,
                                    GGMLRunner* runner) {
+  if (graph != nullptr && next_node >= ggml_graph_n_nodes(graph)) {
+    pathc_icp_mark_graph_run_complete(graph);
+    pathc_icp_dbgf("PATHC graph at end (next=%d n=%d); no pause\n", next_node,
+                    ggml_graph_n_nodes(graph));
+    return;
+  }
   pathc_icp_request_infer_pause();
   pathc_icp_graph_set_resume(graph, next_node);
   pathc_parity_note_resume_node(next_node);

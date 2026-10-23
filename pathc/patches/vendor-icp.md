@@ -19,7 +19,8 @@ Files under `vendor/stable-diffusion.cpp/`:
 - **`diffusion_engine.cpp`:** `pathc_init_incomplete_` + resume via `validate_and_load_runners()` on next `init()`.
 - **`pathc_icp_hooks.*`:** `kPathcInferInstrBudget` ≈ 35×10⁹; `pathc_icp_run_graph_chunked()`; eval callback forces **one node per batch** (`ask` → true); `pathc_icp_note_graph_pause()`.
 - **`ggml_extend_backend.cpp`:** chunked eval + resume node cursor (direct CPU backend path).
-- **`ggml/src/ggml-backend.cpp`:** sched eval loop: resume `j0`, return `GGML_STATUS_ABORTED` on infer pause, clear resume on full success.
+- **`ggml/src/ggml-backend.cpp`:** sched eval loop: resume `j0`, return `GGML_STATUS_ABORTED` on infer pause; when resume cursor ≥ `n_nodes`, treat graph complete (no 0-slice replay).
+- **`pathc_icp_hooks.*`:** when resume cursor reaches end of graph, clear cursor + infer pause (phase handoff); do not keep `mid_graph_suspend` true after last CLIP node.
 - **`ggml_runner.cpp`:** skip `runner_end` on infer pause; sched `ABORTED` → segment pause; keep `compute_ctx` via existing `GraphEndGuard`.
 - **`pipeline/generation.h`:** skip `ConditionerRunnerEndOnExit` when pause/resume graph active.
 - **`pipeline/image.cpp`:** phase cursor (`PathcGenPhase`); embed stash without forced pause; pause-aware embed failure.
