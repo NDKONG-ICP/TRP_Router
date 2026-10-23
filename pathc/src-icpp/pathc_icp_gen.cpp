@@ -235,6 +235,10 @@ bool pathc_icp_gen_stash_pending_clip_hidden(sd::Tensor<float> tensor) {
   return true;
 }
 
+bool pathc_icp_gen_has_pending_clip_hidden() {
+  return g_pending_clip_hidden.has_value();
+}
+
 bool pathc_icp_gen_take_pending_clip_hidden(sd::Tensor<float>& tensor) {
   if (!g_pending_clip_hidden.has_value()) {
     return false;

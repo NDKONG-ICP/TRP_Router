@@ -78,6 +78,7 @@ void pathc_icp_gen_stash_prompt_cond(SDCondition cond);
 bool pathc_icp_gen_has_stashed_prompt_cond();
 bool pathc_icp_gen_load_stashed_prompt_cond(SDCondition& cond);
 bool pathc_icp_gen_stash_pending_clip_hidden(sd::Tensor<float> tensor);
+bool pathc_icp_gen_has_pending_clip_hidden();
 bool pathc_icp_gen_take_pending_clip_hidden(sd::Tensor<float>& tensor);
 bool pathc_icp_gen_stash_pending_unet_output(sd::Tensor<float> tensor);
 bool pathc_icp_gen_take_pending_unet_output(sd::Tensor<float>& tensor);
