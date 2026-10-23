@@ -13,7 +13,19 @@ struct SamplePlan;
 
 struct RefImageParams;
 
+/** Resumable generate phases for step(1) (CONDITION → DENOISE → DECODE → DONE). */
+enum class PathcGenPhase : uint8_t {
+  Idle = 0,
+  Condition = 1,
+  Denoise = 2,
+  Decode = 3,
+  Done = 4,
+};
+
 void pathc_icp_gen_reset();
+PathcGenPhase pathc_icp_gen_phase();
+void pathc_icp_gen_set_phase(PathcGenPhase phase);
+
 bool pathc_icp_gen_try_resume(sd::pipeline::ImageGenerationLatents& latents,
                               sd::pipeline::ImageGenerationEmbeds& embeds,
                               sd::pipeline::GenerationRequest& request,

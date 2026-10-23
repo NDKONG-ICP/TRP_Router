@@ -2,6 +2,7 @@
 
 #ifdef TRP_PATHC_ICP
 
+#include "core/ggml_extend_backend.h"
 #include "ggml.h"
 #include "ic_api.h"
 
@@ -99,7 +100,8 @@ void pathc_icp_graph_set_resume(ggml_cgraph* graph, int next_node) {
 }
 
 int pathc_icp_graph_resume_node(ggml_cgraph* graph) {
-  if (graph == nullptr || graph != g_graph_resume_target) {
+  (void)graph;
+  if (g_graph_resume_target == nullptr) {
     return 0;
   }
   return g_graph_resume_node;
@@ -113,16 +115,46 @@ void pathc_icp_graph_clear_resume() {
 ggml_cgraph* pathc_icp_peek_resume_graph() { return g_graph_resume_target; }
 
 bool pathc_icp_graph_eval_callback(ggml_tensor* t, bool ask, void* user_data) {
-  (void)t;
   (void)user_data;
+  // Force one graph node per batch so we can pause between nodes (avoid running
+  // the whole graph when ask=false for every node).
   if (ask) {
-    return pathc_icp_budget_exceeded();
+    return true;
   }
   if (pathc_icp_budget_exceeded()) {
     pathc_icp_request_infer_pause();
+    if (t != nullptr) {
+      pathc_icp_dbgf("PATHC graph pause after node budget=%llu\n",
+                      static_cast<unsigned long long>(pathc_icp_instr_this_call()));
+    }
     return false;
   }
   return true;
+}
+
+void pathc_icp_note_graph_pause(ggml_cgraph* graph, int next_node) {
+  pathc_icp_graph_set_resume(graph, next_node);
+  pathc_icp_dbgf("PATHC graph resume next_node=%d\n", next_node);
+}
+
+bool pathc_icp_run_graph_chunked(ggml_backend_t backend, ggml_cgraph* graph,
+                                 PathcGraphChunkState* state) {
+  if (graph == nullptr || backend == nullptr) {
+    return false;
+  }
+  const int resume_before = pathc_icp_graph_resume_node(graph);
+  ggml_status st = sd_backend_graph_compute_with_eval_callback(
+      backend, graph, pathc_icp_graph_eval_callback, nullptr);
+  if (state != nullptr) {
+    state->node_cursor = pathc_icp_graph_resume_node(graph);
+    state->done = (st == GGML_STATUS_SUCCESS);
+  }
+  if (st == GGML_STATUS_ABORTED && pathc_icp_infer_pause_requested()) {
+    pathc_icp_dbgf("PATHC run_graph_chunked paused cursor=%d was=%d\n",
+                    pathc_icp_graph_resume_node(graph), resume_before);
+    return false;
+  }
+  return st == GGML_STATUS_SUCCESS;
 }
 
 #endif

@@ -7,7 +7,17 @@
 
 // Leave headroom below the 40B/update subnet cap (validation + denoiser setup).
 constexpr uint64_t kPathcInstrBudget = 8'000'000'000ULL;
-constexpr uint64_t kPathcInferInstrBudget = 10'000'000'000ULL;
+// Headroom below the 40B/update subnet cap for CLIP / UNet / VAE graphs.
+constexpr uint64_t kPathcInferInstrBudget = 35'000'000'000ULL;
+
+struct ggml_backend;
+typedef struct ggml_backend* ggml_backend_t;
+
+/** Resumable chunked graph execution (node cursor persisted in hooks). */
+struct PathcGraphChunkState {
+  bool done = false;
+  int node_cursor = 0;
+};
 
 struct ggml_cgraph;
 struct ggml_tensor;
@@ -44,6 +54,10 @@ int pathc_icp_graph_resume_node(ggml_cgraph* graph);
 void pathc_icp_graph_clear_resume();
 ggml_cgraph* pathc_icp_peek_resume_graph();
 bool pathc_icp_graph_eval_callback(ggml_tensor* t, bool ask, void* user_data);
+/** Run one instruction-bounded slice of graph; false = paused (resume next update). */
+bool pathc_icp_run_graph_chunked(ggml_backend_t backend, ggml_cgraph* graph,
+                                 PathcGraphChunkState* state);
+void pathc_icp_note_graph_pause(ggml_cgraph* graph, int next_node);
 
 #else
 

@@ -20,10 +20,18 @@ struct Stash {
 };
 
 std::optional<Stash> g_stash;
+PathcGenPhase g_phase = PathcGenPhase::Idle;
 
 }  // namespace
 
-void pathc_icp_gen_reset() { g_stash.reset(); }
+void pathc_icp_gen_reset() {
+  g_stash.reset();
+  g_phase = PathcGenPhase::Idle;
+}
+
+PathcGenPhase pathc_icp_gen_phase() { return g_phase; }
+
+void pathc_icp_gen_set_phase(PathcGenPhase phase) { g_phase = phase; }
 
 void pathc_icp_gen_save_after_embeds(sd::pipeline::ImageGenerationLatents latents,
                                      sd::pipeline::ImageGenerationEmbeds embeds,
@@ -39,6 +47,7 @@ void pathc_icp_gen_save_after_embeds(sd::pipeline::ImageGenerationLatents latent
       ref_image_params,
       t0,
   });
+  g_phase = PathcGenPhase::Denoise;
 }
 
 bool pathc_icp_gen_try_resume(sd::pipeline::ImageGenerationLatents& latents,

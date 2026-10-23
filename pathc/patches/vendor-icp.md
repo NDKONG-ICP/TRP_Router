@@ -17,7 +17,13 @@ Files under `vendor/stable-diffusion.cpp/`:
 - **`model_loader.cpp`:** after each tensor, check `pathc_icp_budget_exceeded()` → pause with partial return.
 - **`model_manager.cpp`:** treat pause as partial success (no storage teardown).
 - **`diffusion_engine.cpp`:** `pathc_init_incomplete_` + resume via `validate_and_load_runners()` on next `init()`.
-- **`pathc_icp_hooks.*`:** 35B instruction budget per update call.
+- **`pathc_icp_hooks.*`:** `kPathcInferInstrBudget` ≈ 35×10⁹; `pathc_icp_run_graph_chunked()`; eval callback forces **one node per batch** (`ask` → true); `pathc_icp_note_graph_pause()`.
+- **`ggml_extend_backend.cpp`:** chunked eval + resume node cursor (direct CPU backend path).
+- **`ggml/src/ggml-backend.cpp`:** sched eval loop: resume `j0`, return `GGML_STATUS_ABORTED` on infer pause, clear resume on full success.
+- **`ggml_runner.cpp`:** skip `runner_end` on infer pause; sched `ABORTED` → segment pause; keep `compute_ctx` via existing `GraphEndGuard`.
+- **`pipeline/generation.h`:** skip `ConditionerRunnerEndOnExit` when pause/resume graph active.
+- **`pipeline/image.cpp`:** phase cursor (`PathcGenPhase`); embed stash without forced pause; pause-aware embed failure.
+- **`conditioning/conditioner.hpp`:** return empty condition/tensor on pause (no `GGML_ASSERT` trap mid-CLIP).
 - **Upload:** POSIX `open`/`write`/`O_APPEND` chunked VFS writes (`model.gguf`).
 - **`gguf_io.cpp`:** on ICP, `read_gguf_file` uses `gguf_init_from_file` only (skip `GGUFReader` ifstream).
 

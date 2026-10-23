@@ -2,48 +2,43 @@
 
 **Branch:** `pathc/poc`  
 **Updated:** 2026-10-23  
-**Verdict:** **Load GO** (22× `step(0)`, 1192/1192, `load_done=true`). **Generate IN PROGRESS** — resumable graph + embed/sample split landed; **first `step(1)` still hits 40B/update** during CLIP/text-encode (before embed stash). **No `tmp/onchain-0.png` yet.**
+**Verdict:** **P1 chunked graph engine landed** (wasm `6b6236b7…`). Local replica was restarted with `dfx start --clean`; **GGUF re-upload in progress** after cycle top-up. **Generate not re-benchmarked yet** on this replica.
 
-## Done (2026-10-23)
+## P1 — `run_graph_chunked` (general engine)
 
-| Item | Status |
-|------|--------|
-| Resumable load | q4 GGUF native quant + small-tensor F32 dequant; conv weights **F16 at load** (P1) |
-| `step(1)` API | `generate_done` in Candid; driver loops `step(1)` until done |
-| Graph slicing | `sd_set_backend_eval_callback` + per-node budget (`kPathcInferInstrBudget`); resume node index in `pathc_icp_hooks` |
-| Embed/sample split | After CLIP+latents, stash in `pathc_icp_gen` and return partial update before UNet |
-| Wasm (latest local) | `2451ab9e1e4850d44fb9a8f94633ed84b0dc1b33b6b5b6709ee651bcb88c163e` (see `VERSIONS.md`) |
+| Piece | Location |
+|-------|----------|
+| Budget | `kPathcInferInstrBudget = 35×10⁹` in `pathc_icp_hooks.h` |
+| Eval slice | `pathc_icp_graph_eval_callback`: one node per batch; pause after node if budget exceeded |
+| API | `pathc_icp_run_graph_chunked(backend, graph, state)` wraps `sd_backend_graph_compute_with_eval_callback` |
+| Scheduler | `ggml-backend.cpp` sched eval: resume node, `ABORTED` on pause |
+| Persistence | `GraphEndGuard` + skip `runner_end` / `ConditionerRunnerEndOnExit` on pause |
+| Phases | `PathcGenPhase` in `pathc_icp_gen.*`; `image.cpp` sets Condition → Denoise after embed stash |
+| CLIP traps | `conditioner.hpp` returns empty on pause instead of assert |
 
-## Current blocker (exact)
+**Removed:** debug hook that forced `step(1)` return after every successful CLIP (was blocking same-call denoise).
 
-```
-step(1) → generate_image → prepare_image_generation_embeds (CLIP)
-Reject: Canister exceeded the limit of 40000000000 instructions for single message execution
-```
+## Ops (this session)
 
-Observed: canister log shows `PATHC generate_image 64x64 seed=4242` then reject **before** embed stash / denoise. Instruction-bounded graph eval does not yet split CLIP into sub-40B updates (likely single large matmul nodes and/or scheduler path).
+- **Wasm SHA256:** `6b6236b7b5a83816782629eff1900e6acfcf5382c8316a6df9a8473bb42eb290`
+- **Canister (clean local):** `uxrrr-q7777-77774-qaaaq-cai` (see `.env.pathc`)
+- **Upload:** use `models/sd_turbo-f16-q4_0.gguf`; deposit cycles before large upload (`dfx canister deposit-cycles … diffusion_canister`)
+- **Upload resume:** `upload_model.mjs` resumes when `0 < weights_bytes_loaded < file size`
 
-**Fix direction:**
+## Next (P2–P5)
 
-1. Resumable **conditioner / CLIP** forward (separate phase + cursor, or chunked text tokens).
-2. Confirm eval callback on all runner paths (scheduler hook added in `ggml_runner.cpp`).
-3. Optional: measure one CLIP forward instruction count on replica after (1).
-
-## Mainnet (P5)
-
-**Gated.** Run `dfx wallet balance --network ic` before deploy. Do not fabricate mainnet cycles. Report exact top-up if wallet cannot cover ~3.75 GB wasm memory + ~1.7 GB model upload + generation.
-
-## Ops
-
-- **dfx:** `TERM=xterm-256color` for install/deploy.
-- **Local cycles:** fabricate on `diffusion_canister` only.
-- **Redeploy:** wasm upgrade clears inference state; **VFS weights retained** — re-run 22-step load after upgrade.
+1. Finish upload → 22× `step(0)` load → loop `step(1)` until `generate_done`.
+2. Confirm CLIP completes across multiple updates (canister log: `PATHC graph pause` / `resume next_node=`).
+3. If image noise: flip EPS ↔ V in denoiser build (ICP SD2 path).
+4. Fill `BENCHMARKS.md` with measured calls/instructions; dual-run SHA-256.
 
 ## Commands
 
 ```bash
-TERM=xterm-256color script -q /dev/null bash -c 'cd pathc && dfx start'
+TERM=xterm-256color dfx start
 bash pathc/scripts/build-icpp.sh
-TERM=xterm-256color dfx canister install diffusion_canister --mode upgrade --wasm build/diffusion_canister.wasm --yes
+TERM=xterm-256color dfx deploy diffusion_canister --yes
+dfx canister deposit-cycles 50_000_000_000_000 diffusion_canister
+DFX_IDENTITY=ic_deploy_plain node pathc/scripts/upload_model.mjs models/sd_turbo-f16-q4_0.gguf
 DFX_IDENTITY=ic_deploy_plain node pathc/scripts/onchain_generate.mjs
 ```

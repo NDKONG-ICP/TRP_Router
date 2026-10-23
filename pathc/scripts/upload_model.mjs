@@ -95,14 +95,16 @@ const { actor } = await agentActor();
 console.log("status", await actor.status());
 const modelBytes = readFileSync(model).length;
 let wOff = await actor.weights_bytes_loaded();
-if (process.env.PATHC_FORCE_REUPLOAD === "1" || Number(wOff) !== modelBytes) {
-  if (process.env.PATHC_FORCE_REUPLOAD === "1") {
-    console.log("PATHC_FORCE_REUPLOAD=1 — upload from offset 0");
-  } else {
-    console.log(
-      `weights size mismatch (on-chain ${wOff} vs file ${modelBytes}) — upload from offset 0`,
-    );
-  }
+if (process.env.PATHC_FORCE_REUPLOAD === "1") {
+  console.log("PATHC_FORCE_REUPLOAD=1 — upload from offset 0");
+  wOff = 0n;
+} else if (Number(wOff) > modelBytes) {
+  console.log(`on-chain weights ${wOff} > file ${modelBytes} — restart from 0`);
+  wOff = 0n;
+} else if (Number(wOff) > 0 && Number(wOff) < modelBytes) {
+  console.log(`resume weights upload from offset ${wOff}`);
+} else if (Number(wOff) !== modelBytes) {
+  console.log(`fresh weights upload (on-chain ${wOff}, file ${modelBytes})`);
   wOff = 0n;
 }
 let tOff = await actor.taesd_bytes_loaded();
