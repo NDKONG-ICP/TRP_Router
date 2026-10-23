@@ -11,8 +11,8 @@
 | **Model (on-chain PoC q4)** | `models/sd_turbo-f16-q4_0.gguf` |
 | **Model SHA-256 (q4)** | `9ff4ce3072d47865547898947f2b4627e6153b933cca0bcb7a3c18dc614be2a5` (~1.73 GB on VFS) |
 | **TAESD SHA-256** | `db169d69145ec4ff064e49d99c95fa05d3eb04ee453de35824a6d0f325513549` |
-| **icpp wasm (local, 2026-10-23)** | `26d1e545fb86d4a67b840d97e27ff460e93d66e8a084629350ac2aad1d50deb2` |
-| **Local canister id** | `uqqxf-5h777-77774-qaaaa-cai` (`.env.pathc`) |
-| **Infer budget / update** | `kPathcInferInstrBudget` = **10×10⁹** (load budget **8×10⁹**) |
+| **icpp wasm (local, 2026-10-23 P1)** | `6b6236b7b5a83816782629eff1900e6acfcf5382c8316a6df9a8473bb42eb290` |
+| **Local canister id** | `uxrrr-q7777-77774-qaaaq-cai` (`.env.pathc`; changes after `dfx deploy`) |
+| **Infer budget / update** | `kPathcInferInstrBudget` = **35×10⁹** (load budget **8×10⁹**) |
 
 Update when wasm or model pin changes.
