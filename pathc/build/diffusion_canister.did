@@ -37,7 +37,11 @@ type StepResult = variant {
     instructions : nat64;
     wall_ms : nat64;
     load_done : bool;
+    generate_done : bool;
     tensors_this_call : nat32;
+    tensors_loaded_total : nat32;
+    tensors_total : nat32;
+    gguf_tensors : nat32;
     bytes_loaded : nat64;
   };
   err : text;
@@ -54,6 +58,9 @@ service : {
   upload_taesd_chunk : (record { offset : nat64; chunk : blob }) -> (variant { ok; err : text });
   weights_bytes_loaded : () -> (nat64) query;
   taesd_bytes_loaded : () -> (nat64) query;
+  weights_vfs_probe : () -> (
+    record { vfs_size : nat64; counter_bytes : nat64; head_hex : text }
+  ) query;
   begin : (BeginArgs) -> (BeginResult);
   step : (nat32) -> (StepResult);
   finish : () -> (FinishResult);

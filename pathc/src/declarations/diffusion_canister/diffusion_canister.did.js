@@ -27,12 +27,16 @@ export const idlFactory = ({ IDL }) => {
   });
   const StepResult = IDL.Variant({
     'ok' : IDL.Record({
+      'generate_done' : IDL.Bool,
+      'gguf_tensors' : IDL.Nat32,
       'instructions' : IDL.Nat64,
       'step_index' : IDL.Nat32,
       'load_done' : IDL.Bool,
       'wall_ms' : IDL.Nat64,
       'bytes_loaded' : IDL.Nat64,
+      'tensors_loaded_total' : IDL.Nat32,
       'tensors_this_call' : IDL.Nat32,
+      'tensors_total' : IDL.Nat32,
     }),
     'err' : IDL.Text,
   });
@@ -70,6 +74,17 @@ export const idlFactory = ({ IDL }) => {
         [],
       ),
     'weights_bytes_loaded' : IDL.Func([], [IDL.Nat64], ['query']),
+    'weights_vfs_probe' : IDL.Func(
+        [],
+        [
+          IDL.Record({
+            'head_hex' : IDL.Text,
+            'counter_bytes' : IDL.Nat64,
+            'vfs_size' : IDL.Nat64,
+          }),
+        ],
+        ['query'],
+      ),
   });
 };
 export const init = ({ IDL }) => { return []; };

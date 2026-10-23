@@ -38,6 +38,8 @@ extern Session g_session;
 extern std::vector<StageTiming> g_timings;
 extern std::vector<uint8_t> g_png;
 extern bool g_generated;
+extern bool g_generate_done;
+extern bool g_pathc_resume_load;
 
 uint64_t pathc_now_ms();
 uint64_t pathc_instr_start();
@@ -47,7 +49,10 @@ void pathc_push_timing(const std::string &stage, uint64_t instr,
 std::string pathc_sha256_hex(const std::vector<uint8_t> &data);
 
 void pathc_refresh_vfs_sizes();
+void pathc_on_begin();
 bool pathc_ensure_sd_ctx(std::string &err);
 bool pathc_step_load_model(std::string &err, bool &load_done,
-                           uint32_t &tensors_this_call);
-bool pathc_run_generate(std::string &err);
+                           uint32_t &tensors_this_call,
+                           uint32_t &tensors_loaded_total,
+                           uint32_t &tensors_total);
+bool pathc_run_generate(std::string &err, bool &generate_done);

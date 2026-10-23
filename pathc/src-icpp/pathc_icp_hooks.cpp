@@ -2,18 +2,37 @@
 
 #ifdef TRP_PATHC_ICP
 
+#include "ggml.h"
 #include "ic_api.h"
+
+#include <unordered_map>
+#include <unordered_set>
 
 static uint64_t g_call_instr_start = 0;
 static uint64_t g_call_instr_budget = kPathcInstrBudget;
 static bool g_load_pause = false;
 static uint32_t g_tensors_loaded = 0;
+static std::unordered_map<std::string, size_t> g_param_bytes_loaded;
+static std::unordered_set<std::string> g_finished_params;
+static std::string g_last_load_error;
+static bool g_infer_pause = false;
+static ggml_cgraph* g_graph_resume_target = nullptr;
+static int g_graph_resume_node = 0;
+
+const char* pathc_icp_last_load_error() {
+  return g_last_load_error.empty() ? nullptr : g_last_load_error.c_str();
+}
+
+void pathc_icp_set_load_error(const char* message) {
+  g_last_load_error = message != nullptr ? message : "";
+}
 
 void pathc_icp_reset_call(uint64_t budget) {
   g_call_instr_budget = budget;
   g_call_instr_start = IC_API::performance_counter(
       IC_API::PerformanceCounterType::Instructions);
   g_load_pause = false;
+  g_last_load_error.clear();
 }
 
 uint64_t pathc_icp_instr_this_call() {
@@ -32,5 +51,78 @@ void pathc_icp_clear_load_pause() { g_load_pause = false; }
 uint32_t pathc_icp_tensors_loaded_count() { return g_tensors_loaded; }
 void pathc_icp_inc_tensors_loaded() { g_tensors_loaded++; }
 void pathc_icp_reset_tensors_loaded() { g_tensors_loaded = 0; }
+
+size_t pathc_icp_param_bytes_loaded(const std::string& tensor_name) {
+  auto it = g_param_bytes_loaded.find(tensor_name);
+  if (it == g_param_bytes_loaded.end()) {
+    return 0;
+  }
+  return it->second;
+}
+
+void pathc_icp_set_param_bytes_loaded(const std::string& tensor_name,
+                                      size_t bytes) {
+  g_param_bytes_loaded[tensor_name] = bytes;
+}
+
+void pathc_icp_clear_param_bytes_loaded(const std::string& tensor_name) {
+  g_param_bytes_loaded.erase(tensor_name);
+}
+
+void pathc_icp_reset_param_load_progress() {
+  g_param_bytes_loaded.clear();
+  g_finished_params.clear();
+}
+
+void pathc_icp_mark_param_finished(const std::string& tensor_name) {
+  g_finished_params.insert(tensor_name);
+  g_param_bytes_loaded.erase(tensor_name);
+}
+
+bool pathc_icp_param_is_finished(const std::string& tensor_name) {
+  return g_finished_params.find(tensor_name) != g_finished_params.end();
+}
+
+void pathc_icp_clear_finished_params() { g_finished_params.clear(); }
+
+bool pathc_icp_param_load_complete(const std::string& tensor_name) {
+  return g_param_bytes_loaded.find(tensor_name) == g_param_bytes_loaded.end();
+}
+
+void pathc_icp_request_infer_pause() { g_infer_pause = true; }
+bool pathc_icp_infer_pause_requested() { return g_infer_pause; }
+void pathc_icp_clear_infer_pause() { g_infer_pause = false; }
+
+void pathc_icp_graph_set_resume(ggml_cgraph* graph, int next_node) {
+  g_graph_resume_target = graph;
+  g_graph_resume_node = next_node;
+}
+
+int pathc_icp_graph_resume_node(ggml_cgraph* graph) {
+  if (graph == nullptr || graph != g_graph_resume_target) {
+    return 0;
+  }
+  return g_graph_resume_node;
+}
+
+void pathc_icp_graph_clear_resume() {
+  g_graph_resume_target = nullptr;
+  g_graph_resume_node = 0;
+}
+
+ggml_cgraph* pathc_icp_peek_resume_graph() { return g_graph_resume_target; }
+
+bool pathc_icp_graph_eval_callback(ggml_tensor* t, bool ask, void* user_data) {
+  (void)t;
+  (void)user_data;
+  if (ask) {
+    return pathc_icp_budget_exceeded();
+  }
+  if (pathc_icp_budget_exceeded()) {
+    pathc_icp_request_infer_pause();
+    return false;
+  }
+  return true;
+}
 
 #endif

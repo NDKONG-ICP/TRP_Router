@@ -88,9 +88,24 @@ async function runOnce(a, label) {
     }
     if (loadCalls > 500) throw new Error("load exceeded 500 update calls");
   }
-  const st1 = await a.step(1);
-  console.log(label, "step1 generate", JSON.stringify(st1, (_, v) => (typeof v === "bigint" ? v.toString() : v)));
-  if (st1.err) throw new Error(String(st1.err));
+  let genCalls = 0;
+  let genInstr = 0n;
+  for (;;) {
+    const st1 = await a.step(1);
+    genCalls++;
+    console.log(
+      label,
+      "step1 generate",
+      JSON.stringify(st1, (_, v) => (typeof v === "bigint" ? v.toString() : v)),
+    );
+    if (st1.err) throw new Error(String(st1.err));
+    genInstr += st1.ok.instructions;
+    if (st1.ok.generate_done) {
+      console.log(label, "generate complete", { genCalls, genInstr: genInstr.toString() });
+      break;
+    }
+    if (genCalls > 500) throw new Error("generate exceeded 500 update calls");
+  }
   const fin = await a.finish();
   console.log(label, "finish", JSON.stringify(fin, (_, v) => (typeof v === "bigint" ? v.toString() : v)));
   if (fin.err) throw new Error(String(fin.err));

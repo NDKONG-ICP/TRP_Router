@@ -35,12 +35,16 @@ export interface Status {
 }
 export type StepResult = {
     'ok' : {
+      'generate_done' : boolean,
+      'gguf_tensors' : number,
       'instructions' : bigint,
       'step_index' : number,
       'load_done' : boolean,
       'wall_ms' : bigint,
       'bytes_loaded' : bigint,
+      'tensors_loaded_total' : number,
       'tensors_this_call' : number,
+      'tensors_total' : number,
     }
   } |
   { 'err' : string };
@@ -75,6 +79,10 @@ export interface _SERVICE {
       { 'err' : string }
   >,
   'weights_bytes_loaded' : ActorMethod<[], bigint>,
+  'weights_vfs_probe' : ActorMethod<
+    [],
+    { 'head_hex' : string, 'counter_bytes' : bigint, 'vfs_size' : bigint }
+  >,
 }
 export declare const idlFactory: IDL.InterfaceFactory;
 export declare const init: (args: { IDL: typeof IDL }) => IDL.Type[];

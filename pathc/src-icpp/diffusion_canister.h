@@ -4,6 +4,7 @@
 
 void status() WASM_SYMBOL_EXPORTED("canister_query status");
 void weights_bytes_loaded() WASM_SYMBOL_EXPORTED("canister_query weights_bytes_loaded");
+void weights_vfs_probe() WASM_SYMBOL_EXPORTED("canister_query weights_vfs_probe");
 void taesd_bytes_loaded() WASM_SYMBOL_EXPORTED("canister_query taesd_bytes_loaded");
 void get_png() WASM_SYMBOL_EXPORTED("canister_query get_png");
 void last_timings() WASM_SYMBOL_EXPORTED("canister_query last_timings");

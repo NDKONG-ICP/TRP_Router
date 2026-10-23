@@ -8,10 +8,17 @@ Files under `vendor/stable-diffusion.cpp/`:
 
 ## C4 — instruction-bounded load (applied under `TRP_PATHC_ICP`)
 
+- **`model_loader.cpp`:** large matmul weights native quant byte-copy (chunked, resumable); quant→float dequant at load for 1-D or ≤65536 elements (bias/norm/scales).
+- **`ggml_block.hpp`:** `get_type` on ICP: F32 params for 1-D/small quant; else native quant for linear/matmul; conv weights stay quant in memory.
+- **`ggml_extend.cpp`:** `ggml_ext_conv_kernel` casts quant→F16 for `ggml_conv_2d*` (CPU rejects quant kernels); `ggml_ext_f32_param` for elementwise add/mul.
+- **`diffusion_engine.cpp`:** skip `set_wtype_override` on ICP; skip `is_using_v_parameterization_for_sd2` probe (IC0502 trap); defer `build_denoiser` to its own update.
+- **`pathc_icp_*`:** `ic0_debug_print` tracing, `pathc_icp_mark_param_finished` (load progress source of truth), GGML abort hook.
+- **`model_manager.cpp`:** do not mark params loaded from loader callback `loaded` set before bytes are read.
 - **`model_loader.cpp`:** after each tensor, check `pathc_icp_budget_exceeded()` → pause with partial return.
 - **`model_manager.cpp`:** treat pause as partial success (no storage teardown).
 - **`diffusion_engine.cpp`:** `pathc_init_incomplete_` + resume via `validate_and_load_runners()` on next `init()`.
 - **`pathc_icp_hooks.*`:** 35B instruction budget per update call.
-- **Upload:** dual-write chunks to `ic0` stable + VFS `model.gguf` (buffer-only load: TODO `gguf_init_from_buffer`).
+- **Upload:** POSIX `open`/`write`/`O_APPEND` chunked VFS writes (`model.gguf`).
+- **`gguf_io.cpp`:** on ICP, `read_gguf_file` uses `gguf_init_from_file` only (skip `GGUFReader` ifstream).
 
 Re-apply after vendor bump or keep a fork branch.

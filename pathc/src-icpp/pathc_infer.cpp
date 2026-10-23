@@ -1,8 +1,30 @@
 #include "diffusion_canister.h"
 #include "pathc_internal.h"
+#include "pathc_icp_gen.h"
 #include "pathc_icp_hooks.h"
 #include <cstring>
 #include <fstream>
+
+#include <sys/stat.h>
+
+#include "ic0.h"
+
+#ifdef TRP_PATHC_ICP
+#include "ggml.h"
+
+static void pathc_ggml_abort_hook(const char *message) {
+  pathc_icp_dbg("GGML_ABORT: ");
+  if (message != nullptr) {
+    pathc_icp_dbg(message);
+  }
+  pathc_icp_dbg("\n");
+}
+
+static const bool pathc_ggml_abort_registered = []() {
+  ggml_set_abort_callback(pathc_ggml_abort_hook);
+  return true;
+}();
+#endif
 
 #define STB_IMAGE_WRITE_IMPLEMENTATION
 #include "stb_image_write.h"
@@ -15,21 +37,33 @@ std::vector<StageTiming> g_timings;
 std::vector<uint8_t> g_png;
 
 bool g_generated = false;
+bool g_generate_done = false;
+static uint32_t g_generate_update_calls = 0;
+bool g_pathc_resume_load = false;
 static bool g_sd_load_complete = false;
 static uint32_t g_load_update_calls = 0;
 
 void pathc_refresh_vfs_sizes() {
-  std::ifstream gguf(kModelGgufPath, std::ios::binary | std::ios::ate);
-  if (gguf.is_open()) {
-    g_weights_bytes = static_cast<uint64_t>(gguf.tellg());
+  struct stat st {};
+  if (stat(kModelGgufPath, &st) == 0) {
+    g_weights_bytes = static_cast<uint64_t>(st.st_size);
   }
-  std::ifstream taesd(kTaesdPath, std::ios::binary | std::ios::ate);
-  if (taesd.is_open()) {
-    g_taesd_bytes = static_cast<uint64_t>(taesd.tellg());
+  if (stat(kTaesdPath, &st) == 0) {
+    g_taesd_bytes = static_cast<uint64_t>(st.st_size);
   }
 }
 
-uint64_t pathc_now_ms() { return IC_API::time() / 1'000'000; }
+void pathc_on_begin() {
+  // Keep partial or complete sd_ctx across begin(); step(0) resumes load.
+  g_generated = false;
+  g_generate_done = false;
+#ifdef TRP_PATHC_ICP
+  pathc_icp_gen_reset();
+  pathc_icp_graph_clear_resume();
+#endif
+}
+
+uint64_t pathc_now_ms() { return static_cast<uint64_t>(ic0_time() / 1'000'000); }
 
 uint64_t pathc_instr_start() {
   return IC_API::performance_counter(
@@ -67,7 +101,7 @@ static void pathc_fill_sd_params(sd_ctx_params_t &params) {
   params.n_threads = 1;
   params.rng_type = CPU_RNG;
   params.sampler_rng_type = CPU_RNG;
-  params.enable_mmap = true;
+  params.enable_mmap = false;
   params.eager_load = true;
   params.disable_prefetch = true;
   params.wtype = SD_TYPE_COUNT;
@@ -82,8 +116,12 @@ bool pathc_ensure_sd_ctx(std::string &err) {
 }
 
 bool pathc_step_load_model(std::string &err, bool &load_done,
-                           uint32_t &tensors_this_call) {
+                           uint32_t &tensors_this_call,
+                           uint32_t &tensors_loaded_total,
+                           uint32_t &tensors_total) {
   tensors_this_call = 0;
+  tensors_loaded_total = 0;
+  tensors_total = 0;
   load_done = false;
 
   pathc_refresh_vfs_sizes();
@@ -98,12 +136,19 @@ bool pathc_step_load_model(std::string &err, bool &load_done,
   }
 
   pathc_icp_reset_call();
+  pathc_icp_dbgf("PATHC step_load call=%u resume=%d\n", g_load_update_calls + 1,
+                  g_pathc_resume_load ? 1 : 0);
   const uint64_t t0 = pathc_now_ms();
   const uint64_t i0 = pathc_instr_start();
-  const uint32_t tensors_before = pathc_icp_tensors_loaded_count();
+  uint32_t loaded_before = 0;
+  uint32_t total_before = 0;
+  if (g_sd_ctx != nullptr) {
+    pathc_sd_ctx_weight_stats(g_sd_ctx, &total_before, &loaded_before);
+  }
 
   if (g_sd_ctx == nullptr) {
     pathc_icp_reset_tensors_loaded();
+    pathc_icp_reset_param_load_progress();
     g_sd_ctx = pathc_sd_ctx_alloc_shell();
     if (g_sd_ctx == nullptr) {
       err = "pathc_sd_ctx_alloc_shell failed";
@@ -115,13 +160,32 @@ bool pathc_step_load_model(std::string &err, bool &load_done,
   pathc_fill_sd_params(params);
 
 #ifdef TRP_PATHC_ICP
-  if (!pathc_sd_ctx_step_init(g_sd_ctx, &params)) {
-    err = "pathc_sd_ctx_step_init failed";
+  try {
+    const bool load_ok =
+        (g_pathc_resume_load && g_sd_ctx != nullptr)
+            ? pathc_sd_ctx_continue_load(g_sd_ctx)
+            : pathc_sd_ctx_step_init(g_sd_ctx, &params);
+    if (!load_ok) {
+      if (!pathc_icp_load_pause_requested()) {
+        free_sd_ctx(g_sd_ctx);
+        g_sd_ctx = nullptr;
+        g_pathc_resume_load = false;
+        pathc_icp_reset_param_load_progress();
+      }
+      const char *detail = pathc_icp_last_load_error();
+      err = detail != nullptr ? detail : "pathc_sd_ctx load step failed";
+      return false;
+    }
+  } catch (const std::exception &e) {
+    err = e.what();
     return false;
   }
   if (pathc_sd_ctx_load_complete(g_sd_ctx)) {
     g_sd_load_complete = true;
+    g_pathc_resume_load = false;
     load_done = true;
+  } else {
+    g_pathc_resume_load = true;
   }
 #else
   if (!pathc_sd_ctx_step_init(g_sd_ctx, &params)) {
@@ -132,21 +196,32 @@ bool pathc_step_load_model(std::string &err, bool &load_done,
   load_done = true;
 #endif
 
+  if (g_sd_ctx != nullptr) {
+    pathc_sd_ctx_weight_stats(g_sd_ctx, &tensors_total, &tensors_loaded_total);
+  }
+  if (tensors_loaded_total >= loaded_before) {
+    tensors_this_call = tensors_loaded_total - loaded_before;
+  } else {
+    tensors_this_call = pathc_icp_tensors_loaded_count();
+  }
   g_load_update_calls++;
-  tensors_this_call =
-      pathc_icp_tensors_loaded_count() - tensors_before;
   const uint64_t instr = pathc_instr_delta(i0);
-  pathc_push_timing(load_done ? "load_model_done" : "load_model_partial",
-                    instr, 1, pathc_now_ms() - t0);
+  uint64_t wall = pathc_now_ms() - t0;
+  if (wall == 0) {
+    wall = 1;
+  }
+  pathc_push_timing(load_done ? "load_model_done" : "load_model_partial", instr,
+                    1, wall);
   return true;
 }
 
-bool pathc_run_generate(std::string &err) {
+bool pathc_run_generate(std::string &err, bool &generate_done) {
+  generate_done = g_generate_done;
   if (!g_session.active) {
     err = "call begin first";
     return false;
   }
-  if (g_generated) {
+  if (g_generate_done) {
     return true;
   }
 
@@ -156,8 +231,15 @@ bool pathc_run_generate(std::string &err) {
     return false;
   }
 
+#ifdef TRP_PATHC_ICP
+  pathc_icp_reset_call(kPathcInferInstrBudget);
+  pathc_icp_clear_infer_pause();
+  sd_set_backend_eval_callback(pathc_icp_graph_eval_callback, nullptr);
+#endif
+
   const uint64_t t_gen = pathc_now_ms();
   const uint64_t i_gen = pathc_instr_start();
+  g_generate_update_calls++;
 
   sd_img_gen_params_t iparams;
   sd_img_gen_params_init(&iparams);
@@ -175,13 +257,32 @@ bool pathc_run_generate(std::string &err) {
   sd_image_t *images = nullptr;
   int num_images = 0;
 
+#ifdef TRP_PATHC_ICP
+  pathc_icp_dbgf("PATHC generate_image %dx%d seed=%lld\n", iparams.width,
+                  iparams.height, static_cast<long long>(iparams.seed));
+#endif
   const bool ok =
       generate_image(g_sd_ctx, &iparams, &images, &num_images);
+#ifdef TRP_PATHC_ICP
+  pathc_icp_dbgf("PATHC generate_image ok=%d num=%d\n", ok ? 1 : 0, num_images);
+#endif
 
   const uint64_t gen_wall = pathc_now_ms() - t_gen;
   const uint64_t gen_instr = pathc_instr_delta(i_gen);
 
+#ifdef TRP_PATHC_ICP
+  sd_set_backend_eval_callback(nullptr, nullptr);
+#endif
+
   if (!ok || num_images < 1 || images == nullptr) {
+#ifdef TRP_PATHC_ICP
+    if (pathc_icp_infer_pause_requested()) {
+      pathc_icp_clear_infer_pause();
+      pathc_push_timing("generate_partial", gen_instr, 1, gen_wall);
+      generate_done = false;
+      return true;
+    }
+#endif
     err = "generate_image failed";
     return false;
   }
@@ -200,5 +301,7 @@ bool pathc_run_generate(std::string &err) {
 
   free_sd_images(images, num_images);
   g_generated = true;
+  g_generate_done = true;
+  generate_done = true;
   return true;
 }

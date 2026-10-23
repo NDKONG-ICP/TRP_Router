@@ -41,9 +41,9 @@ void begin() {
 
   g_session = s;
   g_session.active = true;
-  g_generated = false;
   g_png.clear();
   g_timings.clear();
+  pathc_on_begin();
 
   uint64_t session_id = 0;
   ic_api.to_wire(CandidTypeVariant{"ok", CandidTypeNat64{session_id}});
@@ -61,16 +61,39 @@ void step() {
   std::string err;
   bool load_done = false;
   uint32_t tensors_this_call = 0;
+  uint32_t tensors_loaded_total = 0;
+  uint32_t tensors_total = 0;
+  uint32_t gguf_tensors = 0;
   if (step_index == 0) {
-    if (!pathc_step_load_model(err, load_done, tensors_this_call)) {
+    if (!pathc_step_load_model(err, load_done, tensors_this_call,
+                               tensors_loaded_total, tensors_total)) {
       ic_api.to_wire(CandidTypeVariant{"err", CandidTypeText{err}});
       return;
     }
   } else if (step_index == 1) {
-    if (!pathc_run_generate(err)) {
+    bool generate_done = false;
+    if (!pathc_run_generate(err, generate_done)) {
       ic_api.to_wire(CandidTypeVariant{"err", CandidTypeText{err}});
       return;
     }
+    CandidTypeRecord ok;
+    ok.append("step_index", CandidTypeNat32{step_index});
+    ok.append("instructions", CandidTypeNat64{pathc_instr_delta(i0)});
+    uint64_t wall = pathc_now_ms() - t0;
+    if (wall == 0) {
+      wall = 1;
+    }
+    ok.append("wall_ms", CandidTypeNat64{wall});
+    ok.append("load_done", CandidTypeBool{true});
+    ok.append("generate_done", CandidTypeBool{generate_done});
+    uint32_t zero_u32 = 0;
+    ok.append("tensors_this_call", CandidTypeNat32{&zero_u32});
+    ok.append("tensors_loaded_total", CandidTypeNat32{&zero_u32});
+    ok.append("tensors_total", CandidTypeNat32{&zero_u32});
+    ok.append("gguf_tensors", CandidTypeNat32{&zero_u32});
+    ok.append("bytes_loaded", CandidTypeNat64{g_weights_bytes});
+    ic_api.to_wire(CandidTypeVariant{"ok", CandidTypeRecord{ok}});
+    return;
   } else {
     ic_api.to_wire(CandidTypeVariant{
         "err", CandidTypeText{"only step 0 (load) and 1 (generate) supported"}});
@@ -80,18 +103,29 @@ void step() {
   CandidTypeRecord ok;
   ok.append("step_index", CandidTypeNat32{step_index});
   ok.append("instructions", CandidTypeNat64{pathc_instr_delta(i0)});
-  ok.append("wall_ms", CandidTypeNat64{pathc_now_ms() - t0});
+  uint64_t wall = pathc_now_ms() - t0;
+  if (wall == 0) {
+    wall = 1;
+  }
+  ok.append("wall_ms", CandidTypeNat64{wall});
   ok.append("load_done", CandidTypeBool{load_done});
+  ok.append("generate_done", CandidTypeBool{false});
   ok.append("tensors_this_call", CandidTypeNat32{tensors_this_call});
+  ok.append("tensors_loaded_total", CandidTypeNat32{tensors_loaded_total});
+  ok.append("tensors_total", CandidTypeNat32{tensors_total});
+  if (step_index == 0 && g_sd_ctx != nullptr) {
+    gguf_tensors = pathc_sd_ctx_gguf_tensor_count(g_sd_ctx);
+  }
+  ok.append("gguf_tensors", CandidTypeNat32{gguf_tensors});
   ok.append("bytes_loaded", CandidTypeNat64{g_weights_bytes});
   ic_api.to_wire(CandidTypeVariant{"ok", CandidTypeRecord{ok}});
 }
 
 void finish() {
   IC_API ic_api(CanisterUpdate{std::string(__func__)}, false);
-  std::string err;
-  if (!pathc_run_generate(err)) {
-    ic_api.to_wire(CandidTypeVariant{"err", CandidTypeText{err}});
+  if (!g_generate_done || g_png.empty()) {
+    ic_api.to_wire(CandidTypeVariant{
+        "err", CandidTypeText{"generate not complete — loop step(1) until generate_done"}});
     return;
   }
 

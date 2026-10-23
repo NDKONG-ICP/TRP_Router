@@ -1,51 +1,49 @@
 # Path C PoC — build notes (honest staging)
 
 **Branch:** `pathc/poc`  
-**Updated:** 2026-10-22 (C3 upload done, C4 load blocked)  
-**Verdict:** **C2 GO** (wasm links + deploy). **C4 NO-GO** — `step(0)` `new_sd_ctx` on 2 GB q8_0 exceeds **40B instructions/update** on local replica. **No `onchain-0.png`.**
+**Updated:** 2026-10-23  
+**Verdict:** **Load GO** (22× `step(0)`, 1192/1192, `load_done=true`). **Generate IN PROGRESS** — resumable graph + embed/sample split landed; **first `step(1)` still hits 40B/update** during CLIP/text-encode (before embed stash). **No `tmp/onchain-0.png` yet.**
 
-## Done
+## Done (2026-10-23)
 
 | Item | Status |
 |------|--------|
-| icpp wasm | Links ~36 MB; universal `icp_preamble.h`; Candid exports |
-| Local canister | `uxrrr-q7777-77774-qaaaq-cai` |
-| Full weights on canister | **2 023 745 376** B GGUF + TAESD via `node pathc/scripts/upload_model.mjs` (resume + cycle fabricate) |
-| VFS survives **code upgrade** | Verified: after `dfx deploy` upgrade, `weights_bytes_loaded` = 2 023 745 376 without re-upload |
-| Step split | `step(0)` load, `step(1)` generate; scripts default **64×64** |
-| Commits | Phase A, C2, step-split (`86eaeac`) |
+| Resumable load | q4 GGUF native quant + small-tensor F32 dequant; conv weights **F16 at load** (P1) |
+| `step(1)` API | `generate_done` in Candid; driver loops `step(1)` until done |
+| Graph slicing | `sd_set_backend_eval_callback` + per-node budget (`kPathcInferInstrBudget`); resume node index in `pathc_icp_hooks` |
+| Embed/sample split | After CLIP+latents, stash in `pathc_icp_gen` and return partial update before UNet |
+| Wasm (latest local) | `2451ab9e1e4850d44fb9a8f94633ed84b0dc1b33b6b5b6709ee651bcb88c163e` (see `VERSIONS.md`) |
 
-## Storage (honest)
-
-- Uploads land on **WASI VFS** files (`model.gguf`, `taesd.safetensors`), not yet **`ic0` stable memory** / `gguf_init_from_buffer` from stable.
-- **`pathc_refresh_vfs_sizes()`** syncs byte counters from VFS after upgrade.
-
-## Blocker (exact)
+## Current blocker (exact)
 
 ```
-step(0) → new_sd_ctx → StableDiffusionGGML::init → apply_model_update → build_runners
+step(1) → generate_image → prepare_image_generation_embeds (CLIP)
 Reject: Canister exceeded the limit of 40000000000 instructions for single message execution
 ```
 
-Tried: `enable_mmap=true`, `eager_load=false`, `disable_prefetch=true`. Still traps before context is ready.
+Observed: canister log shows `PATHC generate_image 64x64 seed=4242` then reject **before** embed stash / denoise. Instruction-bounded graph eval does not yet split CLIP into sub-40B updates (likely single large matmul nodes and/or scheduler path).
 
-**Fix direction:** Vendor patch (see `patches/vendor-icp.md`) — resumable `ModelManager` tensor load with instruction budget per update; persist loader cursor in canister stable memory between `step(0)` calls.
+**Fix direction:**
+
+1. Resumable **conditioner / CLIP** forward (separate phase + cursor, or chunked text tokens).
+2. Confirm eval callback on all runner paths (scheduler hook added in `ggml_runner.cpp`).
+3. Optional: measure one CLIP forward instruction count on replica after (1).
+
+## Mainnet (P5)
+
+**Gated.** Run `dfx wallet balance --network ic` before deploy. Do not fabricate mainnet cycles. Report exact top-up if wallet cannot cover ~3.75 GB wasm memory + ~1.7 GB model upload + generation.
 
 ## Ops
 
-- **dfx in Cursor:** `TERM=dumb` panics dfx → use `pathc/scripts/dfx.sh` or `TERM=xterm-256color script -q /dev/null bash -c '… dfx …'`.
-- **Cycles:** `dfx ledger fabricate-cycles --t … --canister diffusion_canister` (local only).
-- **Minimize redeploys:** prefer wasm upgrade only; VFS weights retained in current PoC.
+- **dfx:** `TERM=xterm-256color` for install/deploy.
+- **Local cycles:** fabricate on `diffusion_canister` only.
+- **Redeploy:** wasm upgrade clears inference state; **VFS weights retained** — re-run 22-step load after upgrade.
 
 ## Commands
 
 ```bash
-# Replica (keep running)
 TERM=xterm-256color script -q /dev/null bash -c 'cd pathc && dfx start'
-
-# Upload (resume-aware)
-node pathc/scripts/upload_model.mjs
-
-# Inference (blocked at load today)
-PATHC_WIDTH=64 PATHC_HEIGHT=64 node pathc/scripts/onchain_generate.mjs
+bash pathc/scripts/build-icpp.sh
+TERM=xterm-256color dfx canister install diffusion_canister --mode upgrade --wasm build/diffusion_canister.wasm --yes
+DFX_IDENTITY=ic_deploy_plain node pathc/scripts/onchain_generate.mjs
 ```
