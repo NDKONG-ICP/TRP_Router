@@ -115,6 +115,9 @@ static void pathc_icp_mark_graph_run_complete(ggml_cgraph* graph) {
   pathc_icp_graph_clear_resume_force();
   pathc_icp_clear_infer_pause();
   if (pathc_icp_gen_phase() == PathcGenPhase::Condition) {
+    if (GGMLRunner* runner = g_suspended_runner) {
+      runner->pathc_try_stash_condition_hidden_from_active_graph();
+    }
     pathc_icp_gen_set_condition_clip_graph_finished(true);
     pathc_icp_dbg("PATHC condition CLIP graph finished; finish embeds on pipeline entry\n");
   }
