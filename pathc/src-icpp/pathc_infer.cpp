@@ -2,8 +2,11 @@
 #include "pathc_internal.h"
 #include "pathc_icp_gen.h"
 #include "pathc_icp_hooks.h"
+#include "pathc_parity.h"
+#include <cstdint>
 #include <cstring>
 #include <fstream>
+#include <limits>
 
 #include <sys/stat.h>
 
@@ -18,6 +21,8 @@ static void pathc_ggml_abort_hook(const char *message) {
     pathc_icp_dbg(message);
   }
   pathc_icp_dbg("\n");
+  pathc_parity_note_trap(pathc_icp_graph_resume_node(nullptr),
+                          pathc_icp_instr_this_call());
 }
 
 static const bool pathc_ggml_abort_registered = []() {
@@ -40,6 +45,10 @@ bool g_generated = false;
 bool g_generate_done = false;
 static uint32_t g_generate_update_calls = 0;
 bool g_pathc_resume_load = false;
+
+#ifdef TRP_PATHC_ICP
+bool pathc_icp_force_v_prediction() { return g_session.v_prediction; }
+#endif
 static bool g_sd_load_complete = false;
 static uint32_t g_load_update_calls = 0;
 
@@ -53,6 +62,16 @@ void pathc_refresh_vfs_sizes() {
   }
 }
 
+void pathc_apply_session_debug() {
+#ifdef TRP_PATHC_ICP
+  static bool last_v_prediction = false;
+  if (g_sd_ctx != nullptr && g_session.v_prediction != last_v_prediction) {
+    pathc_sd_invalidate_denoiser(g_sd_ctx);
+    last_v_prediction = g_session.v_prediction;
+  }
+#endif
+}
+
 void pathc_on_begin() {
   // Keep partial or complete sd_ctx across begin(); step(0) resumes load.
   g_generated = false;
@@ -60,6 +79,8 @@ void pathc_on_begin() {
 #ifdef TRP_PATHC_ICP
   pathc_icp_gen_reset();
   pathc_icp_graph_clear_resume();
+  pathc_parity_reset();
+  pathc_parity_set_session_flags(g_session.parity_embeds, g_session.parity_unet);
 #endif
 }
 
@@ -232,9 +253,32 @@ bool pathc_run_generate(std::string &err, bool &generate_done) {
   }
 
 #ifdef TRP_PATHC_ICP
-  pathc_icp_reset_call(kPathcInferInstrBudget);
+  {
+    sd_ctx_params_t params;
+    pathc_fill_sd_params(params);
+    if (!pathc_sd_ctx_finish_init(g_sd_ctx, &params)) {
+      err = "pathc_sd_ctx_finish_init failed";
+      return false;
+    }
+    if (!pathc_sd_ctx_load_complete(g_sd_ctx)) {
+      generate_done = false;
+      return true;
+    }
+  }
+  const uint64_t infer_budget = g_session.full_graph
+                                    ? std::numeric_limits<uint64_t>::max()
+                                    : kPathcInferInstrBudget;
+  pathc_icp_reset_call(infer_budget);
   pathc_icp_clear_infer_pause();
-  sd_set_backend_eval_callback(pathc_icp_graph_eval_callback, nullptr);
+  if (g_session.full_graph) {
+    sd_set_backend_eval_callback(nullptr, nullptr);
+    pathc_icp_dbg("PATHC full_graph: eval callback disabled\n");
+  } else {
+    sd_set_backend_eval_callback(pathc_icp_graph_eval_callback, nullptr);
+  }
+  if (pathc_icp_gen_phase() == PathcGenPhase::Idle) {
+    pathc_icp_gen_reset_graph_slice_count();
+  }
 #endif
 
   const uint64_t t_gen = pathc_now_ms();
@@ -251,7 +295,8 @@ bool pathc_run_generate(std::string &err, bool &generate_done) {
   iparams.batch_count = 1;
   iparams.sample_params.sample_steps = static_cast<int>(g_session.steps);
   iparams.sample_params.guidance.txt_cfg = 1.0f;
-  iparams.sample_params.sample_method = EULER_SAMPLE_METHOD;
+  iparams.sample_params.sample_method =
+      g_session.euler_ancestral ? EULER_A_SAMPLE_METHOD : EULER_SAMPLE_METHOD;
   iparams.sample_params.scheduler = DISCRETE_SCHEDULER;
 
   sd_image_t *images = nullptr;
@@ -280,9 +325,31 @@ bool pathc_run_generate(std::string &err, bool &generate_done) {
 
   if (!ok || num_images < 1 || images == nullptr) {
 #ifdef TRP_PATHC_ICP
-    if (pathc_icp_infer_pause_requested()) {
+    // (a) mid-graph suspend, or (b) phase handoff (Condition→Denoise→Decode)
+    if (pathc_icp_mid_graph_suspend() ||
+        pathc_icp_gen_expect_partial_return()) {
       pathc_icp_clear_infer_pause();
-      pathc_push_timing("generate_partial", gen_instr, 1, gen_wall);
+      pathc_icp_gen_clear_expect_partial();
+      const uint32_t slices = pathc_icp_gen_graph_slices_this_phase();
+      const char* phase = "unknown";
+      switch (pathc_icp_gen_phase()) {
+        case PathcGenPhase::Condition:
+          phase = "condition";
+          break;
+        case PathcGenPhase::Denoise:
+          phase = "denoise";
+          break;
+        case PathcGenPhase::Decode:
+          phase = "decode";
+          break;
+        default:
+          break;
+      }
+      pathc_icp_dbgf("PATHC partial return phase=%s slices=%u instr=%llu\n", phase,
+                      slices, static_cast<unsigned long long>(gen_instr));
+      pathc_push_timing(std::string("generate_partial_") + phase, gen_instr, slices,
+                        gen_wall);
+      pathc_icp_gen_reset_graph_slice_count();
       generate_done = false;
       return true;
     }

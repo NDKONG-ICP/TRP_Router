@@ -3,6 +3,7 @@ import type { ActorMethod } from '@dfinity/agent';
 import type { IDL } from '@dfinity/candid';
 
 export interface BeginArgs {
+  'debug_flags' : number,
   'height' : number,
   'seed' : bigint,
   'steps' : number,

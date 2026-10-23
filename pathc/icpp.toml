@@ -13,6 +13,7 @@ cpp_paths = [
     "src-icpp/pathc_icp_hooks.cpp",
     "src-icpp/pathc_icp_gen.cpp",
     "src-icpp/pathc_icp_debug.cpp",
+    "src-icpp/pathc_parity.cpp",
     "src-icpp/pathc_stable.cpp",
     "src-icpp/wasi-exception-stubs.cpp",
     "src-icpp/wasi-dl-stubs.cpp",

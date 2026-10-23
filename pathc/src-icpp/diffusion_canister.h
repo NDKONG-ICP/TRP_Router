@@ -8,6 +8,8 @@ void weights_vfs_probe() WASM_SYMBOL_EXPORTED("canister_query weights_vfs_probe"
 void taesd_bytes_loaded() WASM_SYMBOL_EXPORTED("canister_query taesd_bytes_loaded");
 void get_png() WASM_SYMBOL_EXPORTED("canister_query get_png");
 void last_timings() WASM_SYMBOL_EXPORTED("canister_query last_timings");
+void parity_status() WASM_SYMBOL_EXPORTED("canister_query parity_status");
+void get_parity_blob() WASM_SYMBOL_EXPORTED("canister_query get_parity_blob");
 
 void upload_weights_chunk()
     WASM_SYMBOL_EXPORTED("canister_update upload_weights_chunk");

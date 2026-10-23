@@ -26,8 +26,10 @@ Files under `vendor/stable-diffusion.cpp/`:
 - **`conditioning/conditioner.hpp`:** return empty condition/tensor on pause (no `GGML_ASSERT` trap mid-CLIP).
 - **`ggml_runner.cpp`:** `pathc_compute_suspended_` keeps `graph_active_` + `compute_ctx` on pause; `pathc_resume_paused_compute()` / `pathc_abort_suspended_session()`.
 - **`pathc_icp_gen` + `pathc_generate_image_step`:** condition snapshot; step(1) resumes graph slices without full `generate_image` restart.
+- **Phase-gated pending delivery:** CLIP / UNet / VAE `compute()` take stashed graph output on Condition / Denoise / Decode; denoise `x_t` stash across updates; `run_condition` pause-aware.
+- **Chunked buffer pin:** on graph suspend, pin sched/gallocr workspace (skip `segment_end` + realloc); `ggml_gallocr` skips intermediate free during plan (ICP); clear pin on full graph success.
 - **`ggml-backend.cpp`:** pause/resume uses `pathc_root_graph` (segment graph), not sched copy.
-- **Runner lifecycle (all phases):** `pathc_icp_should_defer_runner_teardown()` gates `runner_end()`, `free_compute_ctx()`, `reset_compute_ctx()`, `GraphEndGuard`/`RunnerEndGuard`, `PathcRunnerEndOnExit` (diffusion sample + control), `ConditionerRunnerEndOnExit` (CLIP). VAE encode/decode `auto_end` paths use `GGMLRunner::runner_end()` → same gate.
+- **Runner lifecycle (all phases):** `pathc_icp_mid_graph_suspend()` / `pathc_icp_should_defer_runner_teardown()` (same predicate) gates teardown **and** completion asserts (empty tensor/condition during pause). `pathc_icp_enter_graph_suspend()` sets resume cursor + pause latch atomically before unwind. **No** defer on bare `graph_active()` (avoids stuck graph without suspend state).
 - **Upload:** POSIX `open`/`write`/`O_APPEND` chunked VFS writes (`model.gguf`).
 - **`gguf_io.cpp`:** on ICP, `read_gguf_file` uses `gguf_init_from_file` only (skip `GGUFReader` ifstream).
 

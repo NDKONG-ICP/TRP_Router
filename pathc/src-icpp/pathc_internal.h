@@ -29,6 +29,11 @@ struct Session {
   uint32_t height = 128;
   uint32_t width = 128;
   bool active = false;
+  bool full_graph = false;
+  bool v_prediction = false;
+  bool euler_ancestral = false;
+  bool parity_embeds = false;
+  bool parity_unet = false;
 };
 
 extern uint64_t g_weights_bytes;
@@ -50,6 +55,7 @@ std::string pathc_sha256_hex(const std::vector<uint8_t> &data);
 
 void pathc_refresh_vfs_sizes();
 void pathc_on_begin();
+void pathc_apply_session_debug();
 bool pathc_ensure_sd_ctx(std::string &err);
 bool pathc_step_load_model(std::string &err, bool &load_done,
                            uint32_t &tensors_this_call,

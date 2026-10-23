@@ -27,6 +27,9 @@ type BeginArgs = record {
   steps : nat32;
   height : nat32;
   width : nat32;
+  /// bit0=full_graph, bit1=v_prediction, bit3(8)=Euler ancestral (default plain Euler)
+  /// bit16(0x10000)=parity embeds dump, bit17(0x20000)=parity UNet step0 dump
+  debug_flags : nat32;
 };
 
 type BeginResult = variant { ok : nat64; err : text };
@@ -72,5 +75,19 @@ service : {
       update_calls : vec nat32;
       wall_ms : vec nat64;
     }
+  ) query;
+  parity_status : () -> (
+    record {
+      embeds_ready : bool;
+      unet_ready : bool;
+      embeds_sha256 : text;
+      unet_sha256 : text;
+      resume_node : nat64;
+      trap_node : nat64;
+      trap_instr : nat64;
+    }
+  ) query;
+  get_parity_blob : (text) -> (
+    variant { ok : blob; err : text }
   ) query;
 };

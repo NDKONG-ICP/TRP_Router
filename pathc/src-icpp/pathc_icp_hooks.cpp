@@ -1,4 +1,6 @@
 #include "pathc_icp_hooks.h"
+#include "pathc_icp_gen.h"
+#include "pathc_parity.h"
 
 #ifdef TRP_PATHC_ICP
 
@@ -101,6 +103,44 @@ void pathc_icp_graph_set_resume(ggml_cgraph* graph, int next_node) {
   g_graph_resume_node = next_node;
 }
 
+int pathc_icp_graph_node_index(const ggml_cgraph* graph, const ggml_tensor* node) {
+  if (graph == nullptr || node == nullptr) {
+    return -1;
+  }
+  const int n_nodes = ggml_graph_n_nodes(const_cast<ggml_cgraph*>(graph));
+  for (int i = 0; i < n_nodes; ++i) {
+    if (ggml_graph_node(const_cast<ggml_cgraph*>(graph), i) == node) {
+      return i;
+    }
+  }
+  return -1;
+}
+
+void pathc_icp_enter_graph_suspend_after(const ggml_cgraph* graph,
+                                         const ggml_tensor* last_node,
+                                         GGMLRunner* runner) {
+  const int last = pathc_icp_graph_node_index(graph, last_node);
+  const int next = last >= 0 ? last + 1 : 0;
+  pathc_icp_enter_graph_suspend(const_cast<ggml_cgraph*>(graph), next, runner);
+}
+
+void pathc_icp_checkpoint_graph_progress(const ggml_cgraph* graph,
+                                         const ggml_tensor* last_node) {
+  if (graph == nullptr || last_node == nullptr) {
+    return;
+  }
+  const int last = pathc_icp_graph_node_index(graph, last_node);
+  if (last < 0) {
+    return;
+  }
+  const int next = last + 1;
+  if (g_graph_resume_target != graph) {
+    pathc_icp_graph_set_resume(const_cast<ggml_cgraph*>(graph), next);
+  } else if (next > g_graph_resume_node) {
+    g_graph_resume_node = next;
+  }
+}
+
 int pathc_icp_graph_resume_node(ggml_cgraph* graph) {
   (void)graph;
   if (g_graph_resume_target == nullptr) {
@@ -110,9 +150,19 @@ int pathc_icp_graph_resume_node(ggml_cgraph* graph) {
 }
 
 void pathc_icp_graph_clear_resume() {
+  if (g_suspended_runner != nullptr) {
+    return;
+  }
   g_graph_resume_target = nullptr;
   g_graph_resume_node = 0;
 }
+
+void pathc_icp_graph_clear_resume_force() {
+  g_graph_resume_target = nullptr;
+  g_graph_resume_node = 0;
+}
+
+void pathc_icp_clear_workspace_pin() {}
 
 ggml_cgraph* pathc_icp_peek_resume_graph() { return g_graph_resume_target; }
 
@@ -124,30 +174,51 @@ GGMLRunner* pathc_icp_peek_suspended_runner() { return g_suspended_runner; }
 
 void pathc_icp_clear_suspended_runner() { g_suspended_runner = nullptr; }
 
-bool pathc_icp_graph_pause_active() {
-  return g_graph_resume_target != nullptr && g_suspended_runner != nullptr;
-}
-
-bool pathc_icp_should_defer_runner_teardown(const GGMLRunner* runner) {
-  if (pathc_icp_infer_pause_requested()) {
+bool pathc_icp_mid_graph_suspend(const GGMLRunner* runner) {
+  if (g_graph_resume_target != nullptr) {
     return true;
   }
-  if (pathc_icp_peek_resume_graph() != nullptr) {
+  if (g_suspended_runner != nullptr) {
     return true;
   }
-  if (runner == nullptr) {
-    return pathc_icp_peek_suspended_runner() != nullptr;
-  }
-  if (pathc_icp_peek_suspended_runner() == runner) {
+  if (runner != nullptr && runner->pathc_compute_suspended()) {
     return true;
   }
-  if (runner->pathc_compute_suspended()) {
-    return true;
-  }
-  if (runner->graph_active()) {
+  // Budget latch set in eval callback; resume cursor written in same backend slice.
+  if (g_infer_pause) {
     return true;
   }
   return false;
+}
+
+bool pathc_icp_graph_pause_active() { return pathc_icp_mid_graph_suspend(nullptr); }
+
+bool pathc_icp_should_defer_runner_teardown(const GGMLRunner* runner) {
+  return pathc_icp_mid_graph_suspend(runner);
+}
+
+bool pathc_icp_workspace_allocation_pinned() {
+  return pathc_icp_peek_resume_graph() != nullptr;
+}
+
+void pathc_icp_set_workspace_allocation_pinned(bool) {}
+
+extern "C" bool pathc_icp_no_intermediate_galloc_reuse(void) {
+  // Pinning workspace is the critical fix; full no-reuse planning blows UNet
+  // compute buffer on WASM for large graphs — enable only for tiny probe graphs.
+  return false;
+}
+
+void pathc_icp_enter_graph_suspend(ggml_cgraph* graph, int next_node,
+                                   GGMLRunner* runner) {
+  pathc_icp_request_infer_pause();
+  pathc_icp_graph_set_resume(graph, next_node);
+  pathc_parity_note_resume_node(next_node);
+  if (runner != nullptr) {
+    pathc_icp_set_suspended_runner(runner);
+  }
+  pathc_icp_dbgf("PATHC graph suspend next_node=%d runner=%p\n", next_node,
+                  static_cast<void*>(runner));
 }
 
 PathcRunnerEndOnExit::~PathcRunnerEndOnExit() {
@@ -171,12 +242,12 @@ bool pathc_icp_graph_eval_callback(ggml_tensor* t, bool ask, void* user_data) {
     }
     return false;
   }
+  pathc_icp_gen_inc_graph_slice_count();
   return true;
 }
 
 void pathc_icp_note_graph_pause(ggml_cgraph* graph, int next_node) {
-  pathc_icp_graph_set_resume(graph, next_node);
-  pathc_icp_dbgf("PATHC graph resume next_node=%d\n", next_node);
+  pathc_icp_enter_graph_suspend(graph, next_node, nullptr);
 }
 
 bool pathc_icp_run_graph_chunked(ggml_backend_t backend, ggml_cgraph* graph,
@@ -191,7 +262,7 @@ bool pathc_icp_run_graph_chunked(ggml_backend_t backend, ggml_cgraph* graph,
     state->node_cursor = pathc_icp_graph_resume_node(graph);
     state->done = (st == GGML_STATUS_SUCCESS);
   }
-  if (st == GGML_STATUS_ABORTED && pathc_icp_infer_pause_requested()) {
+  if (st == GGML_STATUS_ABORTED && pathc_icp_mid_graph_suspend(nullptr)) {
     pathc_icp_dbgf("PATHC run_graph_chunked paused cursor=%d was=%d\n",
                     pathc_icp_graph_resume_node(graph), resume_before);
     return false;

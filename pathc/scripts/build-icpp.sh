@@ -3,7 +3,10 @@
 set -euo pipefail
 SRC="$(cd "$(dirname "$0")/.." && pwd)"
 BUILD_ROOT="${PATHC_BUILD_ROOT:-/tmp/trp-pathc-nospace}"
-rsync -a --delete "$SRC/" "$BUILD_ROOT/"
+rsync -a --delete \
+  --exclude 'vendor/stable-diffusion.cpp/build-native/' \
+  --exclude 'vendor/stable-diffusion.cpp/build-wasi-probe/' \
+  "$SRC/" "$BUILD_ROOT/"
 cd "$BUILD_ROOT"
 
 SD="$BUILD_ROOT/vendor/stable-diffusion.cpp"

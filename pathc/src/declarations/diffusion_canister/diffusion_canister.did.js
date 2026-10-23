@@ -1,5 +1,6 @@
 export const idlFactory = ({ IDL }) => {
   const BeginArgs = IDL.Record({
+    'debug_flags' : IDL.Nat32,
     'height' : IDL.Nat32,
     'seed' : IDL.Nat64,
     'steps' : IDL.Nat32,
@@ -83,6 +84,26 @@ export const idlFactory = ({ IDL }) => {
             'vfs_size' : IDL.Nat64,
           }),
         ],
+        ['query'],
+      ),
+    'parity_status' : IDL.Func(
+        [],
+        [
+          IDL.Record({
+            'embeds_ready' : IDL.Bool,
+            'unet_ready' : IDL.Bool,
+            'embeds_sha256' : IDL.Text,
+            'unet_sha256' : IDL.Text,
+            'resume_node' : IDL.Nat64,
+            'trap_node' : IDL.Nat64,
+            'trap_instr' : IDL.Nat64,
+          }),
+        ],
+        ['query'],
+      ),
+    'get_parity_blob' : IDL.Func(
+        [IDL.Text],
+        [IDL.Variant({ 'ok' : IDL.Vec(IDL.Nat8), 'err' : IDL.Text })],
         ['query'],
       ),
   });

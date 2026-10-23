@@ -34,12 +34,26 @@
 - **Upload:** use `models/sd_turbo-f16-q4_0.gguf`; deposit cycles before large upload (`dfx canister deposit-cycles … diffusion_canister`)
 - **Upload resume:** `upload_model.mjs` resumes when `0 < weights_bytes_loaded < file size`
 
+## Numerical correctness (2026-10-23)
+
+| Check | Result |
+|-------|--------|
+| Host `sd-cli` 16×16, q4 GGUF, prompt/seed 4242, Euler **A**, eps | SHA `df89bcd7…` — structured image (~3.4k unique RGB) |
+| Canister chunked (same nominal inputs) | SHA `aef78be4…` — flat brown (~726 unique RGB); **byte mismatch** |
+| `debug_flags` bit0 **full_graph** (no chunking) | **IC0502** on first `step(1)` (~>40B) — chunking required at 16×16 |
+| Stale global resume graph in `GGMLRunner::compute()` | Fixed (clear before new forward); **same** canister SHA → not sole cause |
+| EPS ↔ V (`debug_flags` bit1) | Needs `pathc_invalidate_denoiser()` on `begin()` when flag changes (added); re-test after rebuild |
+
+**Suspects (ordered):** (1) chunked sched resume + pending tensor handoff; (2) ICP q4 matmul / F16 conv vs host CPU; (3) wrong prediction (eps vs v) if invalidate fix changes output.
+
+**Tools:** `scripts/compare_host_canister.sh`; `scripts/parity_harness.sh` (staged PATHCPAR1 embeds → UNet → decode); `begin.debug_flags`: bit0=full_graph, bit1=v_pred, bit3(8)=plain Euler, bit16=parity embeds, bit17=parity UNet step0.
+
 ## Next (P2–P5)
 
-1. Finish upload → 22× `step(0)` load → loop `step(1)` until `generate_done`.
-2. Confirm CLIP completes across multiple updates (canister log: `PATHC graph pause` / `resume next_node=`).
-3. If image noise: flip EPS ↔ V in denoiser build (ICP SD2 path).
-4. Fill `BENCHMARKS.md` with measured calls/instructions; dual-run SHA-256.
+1. Re-test **v_pred** after denoiser invalidate + compare SHA to host `--prediction v` (`982c2cb3…`).
+2. Optional: force F32 matmul at load (A/B) to isolate q4 WASM path.
+3. Latent checksum hook before TAESD decode (host vs canister).
+4. Dual-run SHA-256 determinism once image matches host.
 
 ## Commands
 
