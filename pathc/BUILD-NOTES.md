@@ -2,7 +2,7 @@
 
 **Branch:** `pathc/poc`  
 **Updated:** 2026-10-23  
-**Verdict:** **P1 chunked graph engine landed** (wasm `6b6236b7…`). Local replica was restarted with `dfx start --clean`; **GGUF re-upload in progress** after cycle top-up. **Generate not re-benchmarked yet** on this replica.
+**Verdict:** **P1 chunked graph + P2 resume continuity** (wasm `f4535ee1…`). **Do not** `dfx start --clean` or re-upload unless `weights_bytes_loaded==0`. Deploy with **`dfx canister install --mode upgrade`**. On-chain generate re-running after resume fix (commit `f8299fa`).
 
 ## P1 — `run_graph_chunked` (general engine)
 
@@ -17,6 +17,15 @@
 | CLIP traps | `conditioner.hpp` returns empty on pause instead of assert |
 
 **Removed:** debug hook that forced `step(1)` return after every successful CLIP (was blocking same-call denoise).
+
+## P2 — resume continuity (IC0502 on 2nd step(1))
+
+| Piece | Behavior |
+|-------|----------|
+| `pathc_generate_image_step` | If `pathc_icp_peek_suspended_runner()` → **only** `pathc_resume_paused_compute()` (no full pipeline) |
+| `GGMLRunner` | On infer pause: keep `graph_active_` + `compute_ctx`; register runner in hooks |
+| Condition snapshot | `pathc_icp_gen_save_in_condition` before CLIP; `pathc_generate_image_continue` after graph completes |
+| Sched pause | `pathc_root_graph` pointer (stable segment graph, not sched copy) |
 
 ## Ops (this session)
 
