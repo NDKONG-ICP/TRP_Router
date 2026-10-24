@@ -23,6 +23,11 @@
       "package": "mock_trp_ledger",
       "candid": "mock_trp_ledger.did"
     },
+    "trp_meter": {
+      "type": "rust",
+      "package": "trp_meter",
+      "candid": "trp_meter/trp_meter.did"
+    },
     "trp_playground": {
       "type": "assets",
       "source": ["dist/playground"]

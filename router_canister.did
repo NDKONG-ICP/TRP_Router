@@ -32,6 +32,7 @@ service : {
   init_router : (principal) -> (); // blob_store canister id
   set_llama_qwen25 : (principal) -> (); // llama_cpp_qwen25 canister id (M3)
   set_diffusion_canister : (principal) -> (); // Path C diffusion (7chv3 on mainnet)
+  set_trp_meter : (principal) -> (); // Phase 2 metering gate
   register_playground_api_key : (text) -> (); // controller-only beta API key hash
   set_http_transform : (principal) -> (); // legacy no-op
   transform : (record { response : record { status : nat; headers : vec record { text; text }; body : blob }; context : blob }) -> (record { status : nat; headers : vec record { text; text }; body : blob }) query;

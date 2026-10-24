@@ -35,6 +35,8 @@ bool caller_is_allowlisted(IC_API &ic_api) {
       "ucw6l-apn5m-ycnrv-s7xtt-lvchu-jz5f3-3oeq7-ttuhk-rjvjp-sdnbj-lqe",
       // ic_deploy secure identity (controller)
       "xx6vh-r5j7z-ujant-uvv2w-anfdf-jtyus-2t5xx-joumb-d2j5s-haivw-tae",
+      // TRP router_canister (mainnet) — orchestrates diffusion for playground/API
+      "5723t-oaaaa-aaaao-bbquq-cai",
   };
   for (const char *text : kOwnerAllowlist) {
     if (principal_bytes_equal(caller, CandidTypePrincipal(text))) {

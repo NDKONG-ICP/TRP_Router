@@ -3,6 +3,7 @@ mod chat_providers;
 mod diffusion_cache;
 mod image_providers;
 mod image_quota;
+mod meter_client;
 mod mcp;
 mod models;
 mod moderation;
@@ -77,6 +78,7 @@ thread_local! {
     static RELAY_SECRET: RefCell<Option<String>> = RefCell::new(None);
     static REQ_SEQ: RefCell<u64> = RefCell::new(0);
     static DIFFUSION_CANISTER: RefCell<Option<Principal>> = RefCell::new(None);
+    static TRP_METER: RefCell<Option<Principal>> = RefCell::new(None);
 }
 
 fn next_req_seq() -> u64 {
@@ -186,6 +188,11 @@ fn set_llama_qwen25(llama: Principal) {
 #[update]
 fn set_diffusion_canister(diffusion: Principal) {
     DIFFUSION_CANISTER.with(|d| *d.borrow_mut() = Some(diffusion));
+}
+
+#[update]
+fn set_trp_meter(meter: Principal) {
+    TRP_METER.with(|m| *m.borrow_mut() = Some(meter));
 }
 
 /// Register a playground API key (SHA-256 stored). Controller-only.
@@ -353,9 +360,19 @@ async fn handle_raven_diffusion(
     if let Err(e) = moderation::check_prompt_policy(&parsed.prompt) {
         return json_response(400, &format!(r#"{{"error":"{e}"}}"#));
     }
-    if let Err(e) = image_quota::consume_raven_diffusion_slot(actor) {
-        return json_response(429, &format!(r#"{{"error":"{e}"}}"#));
-    }
+    // Free-tier quota (BETA): router-side cap; meter adds reserve/settle when configured.
+    let meter = TRP_METER.with(|m| m.borrow().clone());
+    let job_id = if let Some(m) = meter {
+        match meter_client::begin_job(m, actor, "img-64-1").await {
+            Ok(id) => Some(id),
+            Err(e) => return json_response(429, &format!(r#"{{"error":"{e}"}}"#)),
+        }
+    } else {
+        if let Err(e) = image_quota::consume_raven_diffusion_slot(actor) {
+            return json_response(429, &format!(r#"{{"error":"{e}"}}"#));
+        }
+        None
+    };
     let seed = parsed.seed.unwrap_or(4242);
     let actor_key = actor.to_text();
     let now = time();
@@ -367,11 +384,20 @@ async fn handle_raven_diffusion(
             .clone()
             .unwrap_or_else(pathc_client::default_diffusion_principal)
     });
-    let out = match pathc_client::generate_raven_diffusion(diffusion, &parsed.prompt, seed).await
-    {
+    let out = match pathc_client::generate_raven_diffusion(diffusion, &parsed.prompt, seed).await {
         Ok(v) => v,
-        Err(e) => return json_response(502, &format!(r#"{{"error":"{e}"}}"#)),
+        Err(e) => {
+            if let (Some(m), Some(j)) = (meter.clone(), job_id) {
+                let _ = meter_client::release_job(m, j).await;
+            }
+            return json_response(502, &format!(r#"{{"error":"{e}"}}"#));
+        }
     };
+    if let (Some(m), Some(j)) = (meter, job_id) {
+        if let Err(e) = meter_client::settle_job(m, j).await {
+            return json_response(502, &format!(r#"{{"error":"meter settle: {e}"}}"#));
+        }
+    }
     use base64::Engine;
     let b64 = base64::engine::general_purpose::STANDARD.encode(&out.png);
     let created = now;
