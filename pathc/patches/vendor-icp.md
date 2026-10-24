@@ -22,6 +22,8 @@ Files under `vendor/stable-diffusion.cpp/`:
 - **`ggml/src/ggml-backend.cpp`:** sched eval loop: resume `j0`, return `GGML_STATUS_ABORTED` on infer pause; when resume cursor ≥ `n_nodes`, treat graph complete (no 0-slice replay).
 - **`pathc_icp_hooks.*` + `pathc_icp_gen.*`:** when Condition-phase CLIP graph hits `n_nodes`, set `condition_clip_graph_finished`, read CLIP output without cursor replay, then `save_after_embeds` → **Denoise** (fresh resume cursor for UNet).
 - **`ggml_runner.cpp`:** Decode phase matches `vae` / `taesd` / `taehv` for host-cpy + stash; materialized `data!=null` readback only.
+- **`ggml_runner.cpp`:** After TAESD/VAE `execute_graph` readback, stash RGB into `g_pending_vae_output` and set `decode_vae_graph_finished`; sched segment end also calls `pathc_try_stash_phase_output`.
+- **`pathc_icp_hooks.cpp`:** Do not call `pathc_icp_mark_graph_run_complete` when a scheduler segment subgraph ends before the full session graph (avoids false “VAE NOT captured”).
 - **`pathc_icp_gen`:** `decode_vae_graph_finished` gated on pending VAE capture (mirror CLIP); cleared on enter Decode / success.
 - **`ggml_runner.cpp`:** `pathc_read_and_teardown_completed_graph()` when resume cursor cleared at graph end; do not abort/replay from node 0.
 - **`ggml_runner.cpp`:** skip `runner_end` on infer pause; sched `ABORTED` → segment pause; keep `compute_ctx` via existing `GraphEndGuard`.

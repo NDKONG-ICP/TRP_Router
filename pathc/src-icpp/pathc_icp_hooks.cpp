@@ -204,6 +204,17 @@ void pathc_icp_checkpoint_graph_progress(const ggml_cgraph* graph,
   const int next = last + 1;
   const int n_nodes = ggml_graph_n_nodes(const_cast<ggml_cgraph*>(graph));
   if (next >= n_nodes) {
+    // Segment subgraphs (scheduler cuts) can finish before the full forward graph.
+    // Do not treat that as phase graph completion / VAE capture — only the session graph.
+    if (GGMLRunner* runner = g_suspended_runner) {
+      ggml_cgraph* session = runner->pathc_suspended_graph_ptr();
+      if (session != nullptr && graph != session) {
+        const int session_nodes = ggml_graph_n_nodes(session);
+        if (n_nodes < session_nodes) {
+          return;
+        }
+      }
+    }
     pathc_icp_mark_graph_run_complete(const_cast<ggml_cgraph*>(graph));
     return;
   }
