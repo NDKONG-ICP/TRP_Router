@@ -1,11 +1,15 @@
 mod blob_client;
 mod chat_providers;
+mod diffusion_cache;
 mod image_providers;
+mod image_quota;
 mod mcp;
 mod models;
 mod moderation;
 mod onchain;
+mod pathc_client;
 mod payments;
+mod playground_auth;
 mod raven_art;
 mod relay_client;
 
@@ -72,6 +76,7 @@ thread_local! {
     static RELAY_URL: RefCell<Option<String>> = RefCell::new(None);
     static RELAY_SECRET: RefCell<Option<String>> = RefCell::new(None);
     static REQ_SEQ: RefCell<u64> = RefCell::new(0);
+    static DIFFUSION_CANISTER: RefCell<Option<Principal>> = RefCell::new(None);
 }
 
 fn next_req_seq() -> u64 {
@@ -104,7 +109,7 @@ fn public_blob_url(blob_id: &str) -> String {
     }
 }
 
-fn json_response(status: u16, body: &str) -> HttpResponse {
+pub(crate) fn json_response(status: u16, body: &str) -> HttpResponse {
     HttpResponse {
         status_code: status,
         headers: vec![HeaderField(
@@ -152,6 +157,7 @@ struct ImageGenBody {
     prompt: String,
     model: Option<String>,
     size: Option<String>,
+    seed: Option<u64>,
 }
 
 #[derive(SerdeDeserialize)]
@@ -175,6 +181,17 @@ fn init_router(blob_store: Principal) {
 #[update]
 fn set_llama_qwen25(llama: Principal) {
     LLAMA_QWEN25.with(|l| *l.borrow_mut() = Some(llama));
+}
+
+#[update]
+fn set_diffusion_canister(diffusion: Principal) {
+    DIFFUSION_CANISTER.with(|d| *d.borrow_mut() = Some(diffusion));
+}
+
+/// Register a playground API key (SHA-256 stored). Controller-only.
+#[update]
+fn register_playground_api_key(key: String) {
+    playground_auth::register_api_key(key);
 }
 
 #[update]
@@ -318,11 +335,65 @@ fn credit_balance() -> Nat {
     Nat::from(payments::caller_credits(caller()))
 }
 
-async fn handle_images_generations(body: &[u8]) -> HttpResponse {
+fn is_raven_diffusion_model(model: Option<&str>) -> bool {
+    matches!(
+        model,
+        Some("raven-diffusion") | Some("trp/raven-diffusion") | Some("trp/onchain-raven-diffusion")
+    )
+}
+
+async fn handle_raven_diffusion(
+    headers: &[HeaderField],
+    parsed: &ImageGenBody,
+) -> HttpResponse {
+    let actor = match playground_auth::resolve_actor(headers) {
+        Ok(p) => p,
+        Err(resp) => return resp,
+    };
+    if let Err(e) = moderation::check_prompt_policy(&parsed.prompt) {
+        return json_response(400, &format!(r#"{{"error":"{e}"}}"#));
+    }
+    if let Err(e) = image_quota::consume_raven_diffusion_slot(actor) {
+        return json_response(429, &format!(r#"{{"error":"{e}"}}"#));
+    }
+    let seed = parsed.seed.unwrap_or(4242);
+    let actor_key = actor.to_text();
+    let now = time();
+    if let Some(cached) = diffusion_cache::get(&actor_key, &parsed.prompt, seed, now) {
+        return json_response(200, &cached);
+    }
+    let diffusion = DIFFUSION_CANISTER.with(|d| {
+        d.borrow()
+            .clone()
+            .unwrap_or_else(pathc_client::default_diffusion_principal)
+    });
+    let out = match pathc_client::generate_raven_diffusion(diffusion, &parsed.prompt, seed).await
+    {
+        Ok(v) => v,
+        Err(e) => return json_response(502, &format!(r#"{{"error":"{e}"}}"#)),
+    };
+    use base64::Engine;
+    let b64 = base64::engine::general_purpose::STANDARD.encode(&out.png);
+    let created = now;
+    let canister = out.canister.to_text();
+    let body = format!(
+        r#"{{"created":{created},"data":[{{"b64_json":"{b64}","canister":"{canister}","sha256":"{}","deterministic":true}}],"model":"raven-diffusion","provider":"pathc-diffusion"}}"#,
+        out.sha256_hex
+    );
+    diffusion_cache::put(&actor_key, &parsed.prompt, seed, now, body.clone());
+    let mut resp = json_response(200, &body);
+    resp.headers.push(HeaderField("X-TRP-On-Chain".into(), "true".into()));
+    resp
+}
+
+async fn handle_images_generations(body: &[u8], headers: &[HeaderField]) -> HttpResponse {
     let parsed: ImageGenBody = match serde_json::from_slice(body) {
         Ok(v) => v,
         Err(e) => return json_response(400, &format!(r#"{{"error":"invalid json: {e}"}}"#)),
     };
+    if is_raven_diffusion_model(parsed.model.as_deref()) {
+        return handle_raven_diffusion(headers, &parsed).await;
+    }
     if parsed.model.as_deref() == Some("trp/onchain-raven-art") {
         if let Err(e) = moderation::check_prompt(caller(), &parsed.prompt) {
             return json_response(400, &format!(r#"{{"error":"{e}"}}"#));
@@ -419,9 +490,11 @@ async fn handle_mcp(body: &[u8]) -> HttpResponse {
                         "prompt": args.get("prompt").and_then(|v| v.as_str()).unwrap_or("raven"),
                         "size": args.get("size").and_then(|v| v.as_str()),
                     });
-                    let inner =
-                        handle_images_generations(serde_json::to_vec(&payload).unwrap_or_default().as_slice())
-                            .await;
+                    let inner = handle_images_generations(
+                        serde_json::to_vec(&payload).unwrap_or_default().as_slice(),
+                        &[],
+                    )
+                    .await;
                     if inner.status_code != 200 {
                         return inner;
                     }
@@ -582,7 +655,9 @@ async fn http_request_update(req: HttpRequest) -> HttpResponse {
     let path = normalize_path(&req.url);
     if req.method.eq_ignore_ascii_case("POST") {
         match path.as_str() {
-            "/v1/images/generations" => return handle_images_generations(&req.body).await,
+            "/v1/images/generations" => {
+                return handle_images_generations(&req.body, &req.headers).await
+            }
             "/v1/images/edits" => {
                 return json_response(
                     501,

@@ -48,13 +48,18 @@ fn utc_day_ns() -> u64 {
     ic_cdk::api::time() / 86_400_000_000_000
 }
 
-pub fn check_prompt(caller: Principal, prompt: &str) -> Result<(), String> {
+pub fn check_prompt_policy(prompt: &str) -> Result<(), String> {
     let lower = prompt.to_lowercase();
     for bad in DENY {
         if lower.contains(bad) {
             return Err("prompt blocked by content policy (fail-closed)".into());
         }
     }
+    Ok(())
+}
+
+pub fn check_prompt(caller: Principal, prompt: &str) -> Result<(), String> {
+    check_prompt_policy(prompt)?;
     let day = utc_day_ns();
     let principal_ok = PRINCIPAL_COUNTS.with(|m| {
         let mut map = m.borrow_mut();

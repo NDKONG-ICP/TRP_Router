@@ -26,6 +26,7 @@ pub fn catalog() -> Vec<ModelEntry> {
     push("trp/onchain-qwen-0.5b", "onicai", "chat", true, false, true);
     push("trp/onchain-raven-chat", "raven", "chat", true, false, true);
     push("trp/onchain-raven-art", "raven", "image", true, false, true);
+    push("raven-diffusion", "raven", "image", true, false, true);
     push("trp/image-standard", "trp-router", "image", false, false, true);
     push("trp/image-identity", "trp-router", "image", false, false, true);
     push("trp/flux", "pollinations", "image", false, false, true);
