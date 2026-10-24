@@ -111,8 +111,42 @@ fn public_blob_url(blob_id: &str) -> String {
     }
 }
 
-pub(crate) fn json_response(status: u16, body: &str) -> HttpResponse {
+/// BETA CORS for Playground + browser SDK (preflight + actual responses).
+const CORS_ALLOW_ORIGIN: &str = "*";
+
+fn cors_response_headers() -> Vec<HeaderField> {
+    vec![
+        HeaderField("Access-Control-Allow-Origin".into(), CORS_ALLOW_ORIGIN.into()),
+        HeaderField(
+            "Access-Control-Allow-Methods".into(),
+            "POST, OPTIONS, GET".into(),
+        ),
+        HeaderField(
+            "Access-Control-Allow-Headers".into(),
+            "Authorization, Content-Type, x-oc-api-key".into(),
+        ),
+    ]
+}
+
+fn with_cors(mut resp: HttpResponse) -> HttpResponse {
+    for h in cors_response_headers() {
+        resp.headers.push(h);
+    }
+    resp
+}
+
+fn cors_preflight() -> HttpResponse {
     HttpResponse {
+        status_code: 204,
+        headers: cors_response_headers(),
+        body: vec![],
+        streaming_strategy: None,
+        upgrade: None,
+    }
+}
+
+pub(crate) fn json_response(status: u16, body: &str) -> HttpResponse {
+    with_cors(HttpResponse {
         status_code: status,
         headers: vec![HeaderField(
             "Content-Type".into(),
@@ -121,7 +155,7 @@ pub(crate) fn json_response(status: u16, body: &str) -> HttpResponse {
         body: body.as_bytes().to_vec(),
         streaming_strategy: None,
         upgrade: None,
-    }
+    })
 }
 
 fn http_upgrade() -> HttpResponse {
@@ -678,6 +712,9 @@ fn handle_status() -> HttpResponse {
 
 #[update]
 async fn http_request_update(req: HttpRequest) -> HttpResponse {
+    if req.method.eq_ignore_ascii_case("OPTIONS") {
+        return cors_preflight();
+    }
     let path = normalize_path(&req.url);
     if req.method.eq_ignore_ascii_case("POST") {
         match path.as_str() {
@@ -705,23 +742,7 @@ fn http_request(req: HttpRequest) -> HttpResponse {
         return http_upgrade();
     }
     if req.method.eq_ignore_ascii_case("OPTIONS") {
-        return HttpResponse {
-            status_code: 204,
-            headers: vec![
-                HeaderField("Access-Control-Allow-Origin".into(), "*".into()),
-                HeaderField(
-                    "Access-Control-Allow-Methods".into(),
-                    "GET, POST, OPTIONS".into(),
-                ),
-                HeaderField(
-                    "Access-Control-Allow-Headers".into(),
-                    "Content-Type, Authorization, X-TRP-On-Chain".into(),
-                ),
-            ],
-            body: vec![],
-            streaming_strategy: None,
-            upgrade: None,
-        };
+        return cors_preflight();
     }
     match path.as_str() {
         "/v1/models" => handle_models(),

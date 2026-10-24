@@ -51,13 +51,16 @@ fn header_value(headers: &[HeaderField], name: &str) -> Option<String> {
 }
 
 fn bearer_token(headers: &[HeaderField]) -> Option<String> {
-    let auth = header_value(headers, "authorization")?;
-    let rest = auth.strip_prefix("Bearer ")?.trim();
-    if rest.is_empty() {
-        None
-    } else {
-        Some(rest.to_string())
+    if let Some(auth) = header_value(headers, "authorization") {
+        if let Some(rest) = auth.strip_prefix("Bearer ") {
+            let t = rest.trim();
+            if !t.is_empty() {
+                return Some(t.to_string());
+            }
+        }
     }
+    // Browser CORS: icp0.io boundary allows x-oc-api-key, not Authorization.
+    header_value(headers, "x-oc-api-key")
 }
 
 fn unauthorized(msg: &str) -> HttpResponse {

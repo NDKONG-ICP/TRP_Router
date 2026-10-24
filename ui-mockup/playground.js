@@ -19,9 +19,11 @@
   ];
 
   function authHeader() {
-    if (iiPrincipal) return { Authorization: "Bearer ii:" + iiPrincipal };
-    if (apiKey) return { Authorization: "Bearer " + apiKey };
-    return {};
+    const h = {};
+    // icp0.io HTTP boundary allows x-oc-api-key on CORS preflight (not Authorization).
+    if (apiKey) h["x-oc-api-key"] = apiKey;
+    if (iiPrincipal) h["Authorization"] = "Bearer ii:" + iiPrincipal;
+    return h;
   }
 
   function verifyCommand() {
