@@ -2,6 +2,9 @@
 
 #include "wasm_symbol.h"
 
+void canister_inspect_message()
+    WASM_SYMBOL_EXPORTED("canister_inspect_message");
+
 void status() WASM_SYMBOL_EXPORTED("canister_query status");
 void weights_bytes_loaded() WASM_SYMBOL_EXPORTED("canister_query weights_bytes_loaded");
 void weights_vfs_probe() WASM_SYMBOL_EXPORTED("canister_query weights_vfs_probe");

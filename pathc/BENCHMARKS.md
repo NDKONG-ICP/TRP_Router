@@ -44,14 +44,15 @@ Host determinism (CPU RNG): SHA-256 `8e6df8abca06799dd5fcbc49f9e03b1e4580b27beda
 
 ## Mainnet
 
-**PROVEN (2026-10-24)** — fully on-chain 16×16 PNG on **`ic`**, deterministic across two runs.
+**PROVEN (2026-10-24)** — fully on-chain **64×64** PNG on **`ic`**, deterministic across two runs
+AND byte-identical to the local replica (consensus-clean across environments).
 
 | Item | Measured value |
 |------|----------------|
 | **Canister id** | `7chv3-5iaaa-aaaao-bbq3a-cai` |
-| **Wasm module hash** | `0x2cb663998b68a49039f4882075c5d94f71a6d7a186f4dfc788d47a5c6bdb816a` |
+| **Wasm module hash** | `0x9cdc608cc8a4fb902d25492499ad04969f2e6ccb3f0a5fa633add7b464982894` (drain guard via `canister_inspect_message`) |
 | **Controllers** | II (ucw6l…), `ic_deploy` (xx6vh…) — plaintext deployer removed 2026-10-24 |
-| **PNG (16×16, seed 4242)** | **8783 B**, SHA-256 **`bec2a6db063332a7667774016c5e505b6b11af5dc641983a6b564a56e480737f`** (run1 = run2) |
+| **PNG (64×64 output, seed 4242)** | **8783 B**, SHA-256 **`bec2a6db063332a7667774016c5e505b6b11af5dc641983a6b564a56e480737f`** (run1 = run2 = local) |
 | **Generate `step(1)` (run1)** | **7** updates, **≈ 1.91×10¹¹** instr (final row `clip+denoise+taesd` ≈ 2.51×10¹⁰) |
 | **Load `step(0)` (resume)** | **16** updates, **≈ 1.14×10¹¹** instr total (`PATHC_SKIP_BEGIN=1`) |
 | **Canister balance (post-proof)** | **6 650 356 218 255** cycles (~6.65 TC) |
@@ -65,7 +66,13 @@ Host determinism (CPU RNG): SHA-256 `8e6df8abca06799dd5fcbc49f9e03b1e4580b27beda
 | Resume load (587→1192 eager) | **7 070 688 668 173** → **6 956 432 455 943** | **≈ 1.14×10¹¹** |
 | `onchain_generate` run1+run2 | **6 956 432 455 943** → **6 650 356 218 255** | **≈ 3.06×10¹¹** |
 
-Upload + earlier partial load consumed additional cycles during prior sessions (see git history / deploy logs).
+**Per-image measured cost:** run1+run2 Δ = 3.06×10¹¹ cycles → **≈ 1.53×10¹¹ cycles ≈ 0.153 TC ≈ $0.20 per 64×64 image**.
+One-time resume-load ≈ 1.14×10¹¹ cycles (~0.114 TC). Upload + earlier partial load consumed additional cycles during
+prior sessions (see git history / deploy logs).
+
+**SECURITY:** `canister_inspect_message` accepts mutating updates (`begin`, `step`, `finish`, `upload_*_chunk`) only from
+canister controllers or explicit owner principals (II ucw6l…); other ingress is rejected before execution (no canister
+cycle burn). Queries (`status`, `get_png`, `weights_bytes_loaded`, `taesd_bytes_loaded`, …) remain open for verification.
 
 **Not exposed** on the public router until metering/gate is in front (`docs/TRP-Router-Metering-Gate-Spec.md`).
 

@@ -8,6 +8,7 @@ did_path = "diffusion_canister.did"
 cpp_paths = [
     # Canister API + WASI stubs (glob picks src-icpp/wasi-*.cpp)
     "src-icpp/diffusion_canister.cpp",
+    "src-icpp/pathc_inspect.cpp",
     "src-icpp/pathc_upload.cpp",
     "src-icpp/pathc_infer.cpp",
     "src-icpp/pathc_icp_hooks.cpp",
