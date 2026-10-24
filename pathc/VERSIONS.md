@@ -14,7 +14,7 @@
 | **icpp wasm (local, 2026-10-23 P1)** | `6b6236b7b5a83816782629eff1900e6acfcf5382c8316a6df9a8473bb42eb290` |
 | **Local canister id** | `uxrrr-q7777-77774-qaaaq-cai` (`.env.pathc`; changes after `dfx deploy`) |
 | **Mainnet canister id (2026-10-24)** | `7chv3-5iaaa-aaaao-bbq3a-cai` — **live**; PNG SHA `bec2a6db…` (deterministic on `ic`) |
-| **Mainnet wasm (deployed)** | `2cb66399…` on `ic` until upgrade; **build pin (inspect guard)** `9cdc608cc8a4fb902d25492499ad04969f2e6ccb3f0a5fa633add7b464982894` |
+| **Mainnet wasm (deployed)** | `d89a560a…` on `ic` until upgrade; **build pin (inspect guard)** `9cdc608cc8a4fb902d25492499ad04969f2e6ccb3f0a5fa633add7b464982894` |
 | **Infer budget / update** | `kPathcInferInstrBudget` = **35×10⁹** (load budget **8×10⁹**) |
 
 Update when wasm or model pin changes.

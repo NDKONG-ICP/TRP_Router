@@ -294,7 +294,8 @@ bool pathc_run_generate(std::string &err, bool &generate_done) {
   iparams.seed = static_cast<int64_t>(g_session.seed);
   iparams.batch_count = 1;
   iparams.sample_params.sample_steps = static_cast<int>(g_session.steps);
-  iparams.sample_params.guidance.txt_cfg = 1.0f;
+  // SD-Turbo: cfg≈0; higher values wash out conditioning at low step counts.
+  iparams.sample_params.guidance.txt_cfg = 0.0f;
   iparams.sample_params.sample_method =
       g_session.euler_ancestral ? EULER_A_SAMPLE_METHOD : EULER_SAMPLE_METHOD;
   iparams.sample_params.scheduler = DISCRETE_SCHEDULER;

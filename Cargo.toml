@@ -6,6 +6,7 @@ members = [
     "http_transform",
     "diffusion_canister",
     "trp_meter",
+    "raven_nft",
 ]
 resolver = "2"
 

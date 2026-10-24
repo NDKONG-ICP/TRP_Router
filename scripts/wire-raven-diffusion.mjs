@@ -22,6 +22,15 @@ const diffusion =
 dfx(`canister call router_canister set_diffusion_canister "(principal \\"${diffusion}\\")"`);
 console.log("set_diffusion_canister", diffusion);
 
+let llamaId = "5ryw3-vqaaa-aaaao-bbqvq-cai";
+try {
+  llamaId = dfx("canister id llama_cpp_qwen25");
+} catch {
+  /* default mainnet id */
+}
+dfx(`canister call router_canister set_llama_qwen25 "(principal \\"${llamaId}\\")"`);
+console.log("set_llama_qwen25", llamaId);
+
 let apiKey = process.env.TRP_PLAYGROUND_API_KEY;
 if (!apiKey) {
   apiKey = "trp_pg_" + randomBytes(18).toString("hex");
@@ -33,12 +42,21 @@ console.log("register_playground_api_key OK");
 
 const cfgPath = join(root, "ui-mockup", "config.js");
 const routerId = dfx("canister id router_canister");
+let meterId = "6gk2j-eiaaa-aaaao-bbq5a-cai";
+try {
+  meterId = dfx("canister id trp_meter");
+} catch {
+  /* optional */
+}
 const body = `window.TRP_PLAYGROUND = {
   routerPostUrl: "https://${routerId}.icp0.io/v1",
   routerCanisterId: "${routerId}",
   apiKey: "${apiKey}",
   diffusionCanisterId: "${diffusion}",
-  diffusionModuleSha: "2cb663998b68a49039f4882075c5d94f71a6d7a186f4dfc788d47a5c6bdb816a",
+  diffusionModuleSha: "d89a560af45e5a39b5e2ef1572152215b0c78c7690e3af997cb2ff780694c513",
+  ravenNftCanisterId: "62oay-tiaaa-aaaao-bbq7a-cai",
+  trpMeterCanisterId: "${meterId}",
+  icpLedgerCanisterId: "ryjl3-tyaaa-aaaaa-aaaba-cai",
 };
 `;
 import { writeFileSync } from "fs";

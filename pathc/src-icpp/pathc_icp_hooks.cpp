@@ -149,6 +149,11 @@ static void pathc_icp_mark_graph_run_complete(ggml_cgraph* graph) {
   if (GGMLRunner* runner = g_suspended_runner) {
     runner->pathc_release_graph_suspend_latch();
   }
+  // The graph is done, so this runner is no longer suspended. Clear the pointer
+  // (after the uses above) so a completed runner never lingers as "suspended"
+  // into the next generate — otherwise begin()'s abort would corrupt it and the
+  // next generate's first resume would trap (repeated-generate regression).
+  g_suspended_runner = nullptr;
 }
 
 static bool pathc_icp_graph_cursor_past_end(const ggml_cgraph* graph) {

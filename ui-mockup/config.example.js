@@ -4,5 +4,8 @@ window.TRP_PLAYGROUND = {
   routerCanisterId: "5723t-oaaaa-aaaao-bbquq-cai",
   apiKey: "trp_playground_REPLACE_ME",
   diffusionCanisterId: "7chv3-5iaaa-aaaao-bbq3a-cai",
-  diffusionModuleSha: "2cb663998b68a49039f4882075c5d94f71a6d7a186f4dfc788d47a5c6bdb816a",
+  diffusionModuleSha: "d89a560af45e5a39b5e2ef1572152215b0c78c7690e3af997cb2ff780694c513",
+  ravenNftCanisterId: "62oay-tiaaa-aaaao-bbq7a-cai",
+  trpMeterCanisterId: "6gk2j-eiaaa-aaaao-bbq5a-cai",
+  icpLedgerCanisterId: "ryjl3-tyaaa-aaaaa-aaaba-cai",
 };

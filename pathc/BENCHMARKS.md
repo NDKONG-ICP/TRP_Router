@@ -228,3 +228,35 @@ cycle burn). Queries (`status`, `get_png`, `weights_bytes_loaded`, `taesd_bytes_
 - **load** `step(0)` update calls: **1**
 - **generate** `step(1)` update calls: **7**
 - PNG bytes: **8783**, SHA-256: `bec2a6db063332a7667774016c5e505b6b11af5dc641983a6b564a56e480737f`
+
+### On-chain run 2026-10-24 (64×64)
+
+| phase | instructions (sum) | graph node slices (sum) | step(1) or step(0) updates |
+|-------|-------------------:|------------------------:|-----------------------------:|
+| clip+denoise+taesd | 25046504968 | 1 | 1 |
+| generate_partial_condition | 70358242688 | 879 | 2 |
+| generate_partial_decode | 16939708806 | 0 | 1 |
+| generate_partial_denoise | 79056087572 | 2089 | 3 |
+| load_model_done | 60961229 | 1 | 1 |
+| load_model_partial | 169845230958 | 22 | 22 |
+| png_encode | 8583338 | 1 | 1 |
+
+- **load** `step(0)` update calls: **23**
+- **generate** `step(1)` update calls: **7**
+- PNG bytes: **8783**, SHA-256: `bec2a6db063332a7667774016c5e505b6b11af5dc641983a6b564a56e480737f`
+
+### On-chain run 2026-10-24 (64×64)
+
+| phase | instructions (sum) | graph node slices (sum) | step(1) or step(0) updates |
+|-------|-------------------:|------------------------:|-----------------------------:|
+| clip+denoise+taesd | 25064892146 | 1 | 1 |
+| generate_partial_condition | 140757163725 | 1761 | 4 |
+| generate_partial_decode | 26323190031 | 0 | 1 |
+| generate_partial_denoise | 162851735244 | 2127 | 5 |
+| load_model_done | 60961229 | 1 | 1 |
+| load_model_partial | 169845230958 | 22 | 22 |
+| png_encode | 8593647 | 1 | 1 |
+
+- **load** `step(0)` update calls: **23**
+- **generate** `step(1)` update calls: **11**
+- PNG bytes: **8783**, SHA-256: `bec2a6db063332a7667774016c5e505b6b11af5dc641983a6b564a56e480737f`

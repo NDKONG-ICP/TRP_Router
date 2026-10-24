@@ -6,7 +6,7 @@ AND you explicitly confirm (the script requires `CONFIRM_MAINNET=1`).
 
 ## What's proven (local) and ready to ship
 - Fully on-chain diffusion, **deterministic** (two runs → byte-identical `bec2a6db…`), clean finish.
-- WASM to deploy: `2cb663998b68a49039f4882075c5d94f71a6d7a186f4dfc788d47a5c6bdb816a` (38 MB).
+- WASM to deploy: `d89a560af45e5a39b5e2ef1572152215b0c78c7690e3af997cb2ff780694c513` (38 MB).
 - Model: `models/sd_turbo-f16-q4_0.gguf` (1,734,945,536 B, SHA `9ff4ce30…`) + TAESD (`db169d69…`).
 - Measured per-image generate ≈ **189 B instructions / 7 update calls**; load ≈ 161 B / 22 calls.
 
@@ -41,7 +41,7 @@ script's CONTROLLERS before running (don't deploy with a single plaintext contro
 3. Create `diffusion_canister` on `ic` with the controllers.
 4. `dfx canister update-settings --network ic --wasm-memory-limit 4026531840` (3.75 GB) BEFORE load.
 5. `dfx canister install --network ic --mode install --wasm build/diffusion_canister.wasm` (hash-verify
-   it equals `2cb66399…`).
+   it equals `d89a560a…`).
 6. Upload the pinned q4 model + TAESD (chunked) — reuse the project's upload path with `--network ic`.
 7. Run the resumable load loop until `load_done`.
 8. Run `onchain_generate` once → first MAINNET image; record REAL cycles burned.

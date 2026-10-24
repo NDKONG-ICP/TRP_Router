@@ -56,7 +56,15 @@ bool g_decode_vae_graph_finished       = false;
 
 void pathc_icp_gen_abort_suspended() {
   if (GGMLRunner* runner = pathc_icp_peek_suspended_runner()) {
-    runner->pathc_abort_suspended_session();
+    // Only abort a runner that is genuinely mid-suspend. When a generate
+    // completes, g_suspended_runner was left pointing at the last-run runner
+    // (mark_graph_run_complete cleared the resume target but not the runner),
+    // and aborting an already-finished runner corrupts shared backend state —
+    // which made the NEXT generate's first resume trap (the repeated-generate
+    // regression). A finished runner is not suspended, so we skip it here.
+    if (runner->pathc_compute_suspended()) {
+      runner->pathc_abort_suspended_session();
+    }
   }
   pathc_icp_clear_suspended_runner();
   pathc_icp_graph_clear_resume_force();

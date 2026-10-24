@@ -11,7 +11,10 @@
       "type": "rust",
       "package": "router_canister",
       "candid": "router_canister.did",
-      "dependencies": ["blob_store", "http_transform"]
+      "dependencies": [
+        "blob_store",
+        "http_transform"
+      ]
     },
     "http_transform": {
       "type": "rust",
@@ -30,7 +33,9 @@
     },
     "trp_playground": {
       "type": "assets",
-      "source": ["dist/playground"]
+      "source": [
+        "dist/playground"
+      ]
     },
     "llama_cpp_qwen25": {
       "type": "custom",
@@ -42,6 +47,11 @@
           "name": "candid:service"
         }
       ]
+    },
+    "raven_nft": {
+      "type": "rust",
+      "package": "raven_nft",
+      "candid": "raven_nft/raven_nft.did"
     }
   },
   "defaults": {

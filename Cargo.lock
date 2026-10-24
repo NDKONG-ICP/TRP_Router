@@ -434,6 +434,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "raven_nft"
+version = "0.1.0"
+dependencies = [
+ "candid",
+ "hex",
+ "ic-cdk",
+ "ic-cdk-macros",
+ "ic-stable-structures",
+ "serde",
+ "sha2",
+]
+
+[[package]]
 name = "router_canister"
 version = "0.1.0"
 dependencies = [
@@ -593,6 +606,17 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.119",
+]
+
+[[package]]
+name = "trp_meter"
+version = "0.1.0"
+dependencies = [
+ "candid",
+ "ic-cdk",
+ "ic-cdk-macros",
+ "ic-stable-structures",
+ "serde",
 ]
 
 [[package]]

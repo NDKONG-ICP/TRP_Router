@@ -157,16 +157,18 @@ async function runOnce(a, label) {
   const seed = BigInt(process.env.PATHC_SEED || 4242);
   const w = Number(process.env.PATHC_WIDTH || 16);
   const h = Number(process.env.PATHC_HEIGHT || 16);
+  const steps = Number(process.env.PATHC_STEPS || 1);
 
   console.log(label, "begin (single session — do not upgrade canister mid-run)", {
     w,
     h,
+    steps,
     seed: seed.toString(),
     maxGenSteps: MAX_GEN_STEPS,
     debug_flags: DEBUG_FLAGS,
   });
   const b = await callWithRetry(`${label} begin`, () =>
-    a.begin({ prompt, seed, steps: 1, width: w, height: h, debug_flags: DEBUG_FLAGS }),
+    a.begin({ prompt, seed, steps, width: w, height: h, debug_flags: DEBUG_FLAGS }),
   );
   if (b.err) throw new Error(String(b.err));
 
