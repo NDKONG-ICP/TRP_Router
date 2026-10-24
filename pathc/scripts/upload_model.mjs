@@ -88,7 +88,9 @@ async function uploadFile(actor, method, path, resumeFrom = 0n) {
 }
 
 const model =
-  process.argv[2] || join(root, "models/sd_turbo-f16-q8_0.gguf");
+  process.argv[2] ||
+  process.env.PATHC_MODEL_GGUF ||
+  join(root, "models/sd_turbo-f16-q4_0.gguf");
 const taesd = process.argv[3] || join(root, "models/taesd.safetensors");
 
 const { actor } = await agentActor();

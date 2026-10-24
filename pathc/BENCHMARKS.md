@@ -44,7 +44,36 @@ Host determinism (CPU RNG): SHA-256 `8e6df8abca06799dd5fcbc49f9e03b1e4580b27beda
 
 ## Mainnet
 
-**STAGED (P5 gated).** Wallet balance not verified in this session (`dfx wallet balance --network ic` failed with ColorOutOfRange — re-run with `TERM=xterm-256color`). Do not deploy until local image + cycle budget confirmed.
+**IN PROGRESS (2026-10-24) — upload blocked on cycles; no mainnet PNG yet.**
+
+| Item | Measured value |
+|------|----------------|
+| **Canister id** | `7chv3-5iaaa-aaaao-bbq3a-cai` |
+| **Wasm module hash** | `0x2cb663998b68a49039f4882075c5d94f71a6d7a186f4dfc788d47a5c6bdb816a` |
+| **Controllers** | `ic_deploy_plain` (gqkko…), II (ucw6l…), `ic_deploy` (xx6vh…) |
+| **Deploy identity** | `ic_deploy_plain` + `DFX_WARNING=-mainnet_plaintext_identity` |
+| **Cycles wallet** | `daf6l-jyaaa-aaaao-a4nba-cai` |
+| **GGUF upload** | **1 314 800 000 / 1 734 945 536 B (75.8%)** — TAESD not started |
+| **Canister balance (status)** | **1 861 019 736 183** cycles (~1.86 TC) |
+| **Wallet balance (status)** | **133 141 266 037** cycles (~0.13 TC) |
+| **Canister memory** | **2 347 455 137 B** (~2.19 GiB) |
+| **Idle burn / day** | **60 836 879 773** cycles |
+| **Last upload error** | IC0207 — need **≥ 3 737 816 136** cycles above freezing for next chunk |
+
+**Cycles spent (measured, not estimated):** wallet started **1 600 919 018 840** cycles (pre-create status on `daf6l…`); wallet now **133 141 266 037**; canister holds **1 861 019 736 183**. Most wallet balance was moved to the canister via create (`CREATE_CYCLES=1.1×10¹²`) plus deposits **3.5×10¹²** and **9×10¹¹** during upload. **Load / generate / PNG: not run.**
+
+**Resume after top-up:** top up **cycles wallet** (recommend **≥ 2 TC** extra on canister for remaining ~420 MB upload + TAESD + load + generate), then:
+
+```bash
+export DFX_WARNING=-mainnet_plaintext_identity TERM=xterm-256color
+export DFX_NETWORK=ic DFX_IDENTITY=ic_deploy_plain CANISTER_ID_DIFFUSION_CANISTER=7chv3-5iaaa-aaaao-bbq3a-cai
+dfx canister deposit-cycles <amount> 7chv3-5iaaa-aaaao-bbq3a-cai --network ic --identity ic_deploy_plain
+node scripts/upload_model.mjs models/sd_turbo-f16-q4_0.gguf
+node scripts/run_load_loop.mjs
+PATHC_DEBUG_FLAGS=0 node scripts/onchain_generate.mjs
+```
+
+**Not exposed** on the public router (metering/gate first). **Do not** remove plaintext controller until II control is verified post-success.
 
 ## Next engineering
 
@@ -120,3 +149,67 @@ Host determinism (CPU RNG): SHA-256 `8e6df8abca06799dd5fcbc49f9e03b1e4580b27beda
 - **Parity:** `parity_status` / `get_parity_blob`; host tool `build-native/bin/pathc-parity` via `./scripts/build-parity-host.sh`. Canister fetch after CLIP: `./scripts/parity_canister_after_clip.sh` (`debug_flags=65536` = bit16 embeds only).
 - **Deploy:** `dfx canister install --mode upgrade --wasm build/diffusion_canister.wasm` when no generate loop is running; restart `onchain_generate.mjs` and confirm logs advance past `resume_paused_compute node=884`.
 - **Host embeds reference:** native CLIP still aborts on `f32`/`q8_0` CPU binary ops with this GGUF (WASM path differs); `./scripts/parity_harness.sh embeds` blocked until host quant path matches canister or reference is captured on-chain first.
+
+### On-chain run 2026-10-24 (16×16)
+
+| phase | instructions (sum) | graph node slices (sum) | step(1) or step(0) updates |
+|-------|-------------------:|------------------------:|-----------------------------:|
+| clip+denoise+taesd | 24983081951 | 1 | 1 |
+| generate_partial_condition | 70569940131 | 882 | 2 |
+| generate_partial_decode | 13159601838 | 0 | 1 |
+| generate_partial_denoise | 80197020518 | 2105 | 3 |
+| load_model_done | 45841633 | 1 | 1 |
+| load_model_partial | 161452575397 | 21 | 21 |
+| png_encode | 8587287 | 1 | 1 |
+
+- **load** `step(0)` update calls: **22**
+- **generate** `step(1)` update calls: **7**
+- PNG bytes: **8783**, SHA-256: `bec2a6db063332a7667774016c5e505b6b11af5dc641983a6b564a56e480737f`
+
+### On-chain run 2026-10-24 (16×16)
+
+| phase | instructions (sum) | graph node slices (sum) | step(1) or step(0) updates |
+|-------|-------------------:|------------------------:|-----------------------------:|
+| clip+denoise+taesd | 24983350000 | 1 | 1 |
+| generate_partial_condition | 70569940118 | 882 | 2 |
+| generate_partial_decode | 13159601881 | 0 | 1 |
+| generate_partial_denoise | 80197020520 | 2105 | 3 |
+| load_model_done | 45841634 | 1 | 1 |
+| load_model_partial | 161452663622 | 21 | 21 |
+| png_encode | 8587128 | 1 | 1 |
+
+- **load** `step(0)` update calls: **22**
+- **generate** `step(1)` update calls: **7**
+- PNG bytes: **8783**, SHA-256: `bec2a6db063332a7667774016c5e505b6b11af5dc641983a6b564a56e480737f`
+
+### On-chain run 2026-10-24 (16×16)
+
+| phase | instructions (sum) | graph node slices (sum) | step(1) or step(0) updates |
+|-------|-------------------:|------------------------:|-----------------------------:|
+| clip+denoise+taesd | 24983535709 | 1 | 1 |
+| generate_partial_condition | 70569548905 | 882 | 2 |
+| generate_partial_decode | 13159380754 | 0 | 1 |
+| generate_partial_denoise | 80193817081 | 2105 | 3 |
+| load_model_done | 45841741 | 1 | 1 |
+| load_model_partial | 161286514713 | 21 | 21 |
+| png_encode | 8586848 | 1 | 1 |
+
+- **load** `step(0)` update calls: **22**
+- **generate** `step(1)` update calls: **7**
+- PNG bytes: **8783**, SHA-256: `bec2a6db063332a7667774016c5e505b6b11af5dc641983a6b564a56e480737f`
+
+### On-chain run 2026-10-24 (16×16)
+
+| phase | instructions (sum) | graph node slices (sum) | step(1) or step(0) updates |
+|-------|-------------------:|------------------------:|-----------------------------:|
+| clip+denoise+taesd | 24983462877 | 1 | 1 |
+| generate_partial_condition | 70569153867 | 882 | 2 |
+| generate_partial_decode | 13158393079 | 0 | 1 |
+| generate_partial_denoise | 80191542432 | 2105 | 3 |
+| load_model_done | 45841741 | 1 | 1 |
+| load_model_partial | 161286523267 | 21 | 21 |
+| png_encode | 8586848 | 1 | 1 |
+
+- **load** `step(0)` update calls: **22**
+- **generate** `step(1)` update calls: **7**
+- PNG bytes: **8783**, SHA-256: `bec2a6db063332a7667774016c5e505b6b11af5dc641983a6b564a56e480737f`
