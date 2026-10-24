@@ -44,36 +44,30 @@ Host determinism (CPU RNG): SHA-256 `8e6df8abca06799dd5fcbc49f9e03b1e4580b27beda
 
 ## Mainnet
 
-**IN PROGRESS (2026-10-24) — upload blocked on cycles; no mainnet PNG yet.**
+**PROVEN (2026-10-24)** — fully on-chain 16×16 PNG on **`ic`**, deterministic across two runs.
 
 | Item | Measured value |
 |------|----------------|
 | **Canister id** | `7chv3-5iaaa-aaaao-bbq3a-cai` |
 | **Wasm module hash** | `0x2cb663998b68a49039f4882075c5d94f71a6d7a186f4dfc788d47a5c6bdb816a` |
-| **Controllers** | `ic_deploy_plain` (gqkko…), II (ucw6l…), `ic_deploy` (xx6vh…) |
-| **Deploy identity** | `ic_deploy_plain` + `DFX_WARNING=-mainnet_plaintext_identity` |
-| **Cycles wallet** | `daf6l-jyaaa-aaaao-a4nba-cai` |
-| **GGUF upload** | **1 314 800 000 / 1 734 945 536 B (75.8%)** — TAESD not started |
-| **Canister balance (status)** | **1 861 019 736 183** cycles (~1.86 TC) |
-| **Wallet balance (status)** | **133 141 266 037** cycles (~0.13 TC) |
-| **Canister memory** | **2 347 455 137 B** (~2.19 GiB) |
-| **Idle burn / day** | **60 836 879 773** cycles |
-| **Last upload error** | IC0207 — need **≥ 3 737 816 136** cycles above freezing for next chunk |
+| **Controllers** | II (ucw6l…), `ic_deploy` (xx6vh…) — plaintext deployer removed 2026-10-24 |
+| **PNG (16×16, seed 4242)** | **8783 B**, SHA-256 **`bec2a6db063332a7667774016c5e505b6b11af5dc641983a6b564a56e480737f`** (run1 = run2) |
+| **Generate `step(1)` (run1)** | **7** updates, **≈ 1.91×10¹¹** instr (final row `clip+denoise+taesd` ≈ 2.51×10¹⁰) |
+| **Load `step(0)` (resume)** | **16** updates, **≈ 1.14×10¹¹** instr total (`PATHC_SKIP_BEGIN=1`) |
+| **Canister balance (post-proof)** | **6 650 356 218 255** cycles (~6.65 TC) |
+| **Cycles wallet (post-proof)** | **~2.894 TC** on `daf6l-jyaaa-aaaao-a4nba-cai` |
+| **Canister memory (post-proof)** | **5 369 516 705 B** (~5.0 GiB) |
 
-**Cycles spent (measured, not estimated):** wallet started **1 600 919 018 840** cycles (pre-create status on `daf6l…`); wallet now **133 141 266 037**; canister holds **1 861 019 736 183**. Most wallet balance was moved to the canister via create (`CREATE_CYCLES=1.1×10¹²`) plus deposits **3.5×10¹²** and **9×10¹¹** during upload. **Load / generate / PNG: not run.**
+**Cycles burned (measured via `dfx canister status` deltas, not estimates):**
 
-**Resume after top-up:** top up **cycles wallet** (recommend **≥ 2 TC** extra on canister for remaining ~420 MB upload + TAESD + load + generate), then:
+| Phase | Canister balance before → after | Δ cycles |
+|-------|----------------------------------|----------|
+| Resume load (587→1192 eager) | **7 070 688 668 173** → **6 956 432 455 943** | **≈ 1.14×10¹¹** |
+| `onchain_generate` run1+run2 | **6 956 432 455 943** → **6 650 356 218 255** | **≈ 3.06×10¹¹** |
 
-```bash
-export DFX_WARNING=-mainnet_plaintext_identity TERM=xterm-256color
-export DFX_NETWORK=ic DFX_IDENTITY=ic_deploy_plain CANISTER_ID_DIFFUSION_CANISTER=7chv3-5iaaa-aaaao-bbq3a-cai
-dfx canister deposit-cycles <amount> 7chv3-5iaaa-aaaao-bbq3a-cai --network ic --identity ic_deploy_plain
-node scripts/upload_model.mjs models/sd_turbo-f16-q4_0.gguf
-node scripts/run_load_loop.mjs
-PATHC_DEBUG_FLAGS=0 node scripts/onchain_generate.mjs
-```
+Upload + earlier partial load consumed additional cycles during prior sessions (see git history / deploy logs).
 
-**Not exposed** on the public router (metering/gate first). **Do not** remove plaintext controller until II control is verified post-success.
+**Not exposed** on the public router until metering/gate is in front (`docs/TRP-Router-Metering-Gate-Spec.md`).
 
 ## Next engineering
 
@@ -211,5 +205,19 @@ PATHC_DEBUG_FLAGS=0 node scripts/onchain_generate.mjs
 | png_encode | 8586848 | 1 | 1 |
 
 - **load** `step(0)` update calls: **22**
+- **generate** `step(1)` update calls: **7**
+- PNG bytes: **8783**, SHA-256: `bec2a6db063332a7667774016c5e505b6b11af5dc641983a6b564a56e480737f`
+
+### On-chain run 2026-10-24 (16×16)
+
+| phase | instructions (sum) | graph node slices (sum) | step(1) or step(0) updates |
+|-------|-------------------:|------------------------:|-----------------------------:|
+| clip+denoise+taesd | 25069270847 | 1 | 1 |
+| generate_partial_condition | 70325087399 | 879 | 2 |
+| generate_partial_decode | 16967113124 | 0 | 1 |
+| generate_partial_denoise | 79089321625 | 2089 | 3 |
+| png_encode | 8587321 | 1 | 1 |
+
+- **load** `step(0)` update calls: **1**
 - **generate** `step(1)` update calls: **7**
 - PNG bytes: **8783**, SHA-256: `bec2a6db063332a7667774016c5e505b6b11af5dc641983a6b564a56e480737f`

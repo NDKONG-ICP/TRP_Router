@@ -9,26 +9,40 @@ import { Secp256k1KeyIdentity } from "@dfinity/identity-secp256k1";
 import { idlFactory } from "../src/declarations/diffusion_canister/diffusion_canister.did.js";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
-const env = readFileSync(join(root, ".env.pathc"), "utf8");
-const canisterId = env.match(/CANISTER_ID_DIFFUSION_CANISTER='([^']+)'/)[1];
+const NET = process.env.DFX_NETWORK || "local";
+const envPath = join(root, ".env.pathc");
+const env = readFileSync(envPath, "utf8");
+const canisterId =
+  process.env.CANISTER_ID_DIFFUSION_CANISTER ||
+  env.match(/CANISTER_ID_DIFFUSION_CANISTER='([^']+)'/)?.[1];
+if (!canisterId) throw new Error("Set CANISTER_ID_DIFFUSION_CANISTER");
+const idName = process.env.DFX_IDENTITY || "ic_deploy_plain";
 const pem = readFileSync(
-  join(homedir(), ".config/dfx/identity/ic_deploy_plain/identity.pem"),
+  join(homedir(), ".config/dfx/identity", idName, "identity.pem"),
   "utf8",
 );
+const host =
+  process.env.DFX_HOST ||
+  (NET === "ic" ? "https://icp0.io" : "http://127.0.0.1:4943");
 const agent = new HttpAgent({
-  host: "http://127.0.0.1:4943",
+  host,
   identity: Secp256k1KeyIdentity.fromPem(pem),
 });
-await agent.fetchRootKey();
+if (NET !== "ic") await agent.fetchRootKey();
 const a = Actor.createActor(idlFactory, { agent, canisterId });
 
-await a.begin({
-  prompt: "load-only",
-  seed: 0n,
-  steps: 1,
-  width: 64,
-  height: 64,
-});
+if (process.env.PATHC_SKIP_BEGIN !== "1") {
+  await a.begin({
+    prompt: "load-only",
+    seed: 0n,
+    steps: 1,
+    width: 64,
+    height: 64,
+    debug_flags: Number(process.env.PATHC_DEBUG_FLAGS || 0),
+  });
+} else {
+  console.log("PATHC_SKIP_BEGIN=1 — resume load with step(0) only");
+}
 
 const CAP = 40_000_000_000n;
 let calls = 0;
