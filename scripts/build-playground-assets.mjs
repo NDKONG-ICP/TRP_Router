@@ -9,6 +9,10 @@ mkdirSync(out, { recursive: true });
 for (const f of ["index.html", "playground.js"]) {
   cpSync(join(root, "ui-mockup", f), join(out, f));
 }
+const assetsSrc = join(root, "ui-mockup", "assets");
+if (existsSync(assetsSrc)) {
+  cpSync(assetsSrc, join(out, "assets"), { recursive: true });
+}
 const cfg = join(root, "ui-mockup", "config.js");
 cpSync(
   existsSync(cfg) ? cfg : join(root, "ui-mockup", "config.example.js"),
