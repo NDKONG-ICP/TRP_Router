@@ -114,12 +114,35 @@ static void pathc_icp_mark_graph_run_complete(ggml_cgraph* graph) {
   }
   pathc_icp_graph_clear_resume_force();
   pathc_icp_clear_infer_pause();
-  if (pathc_icp_gen_phase() == PathcGenPhase::Condition) {
-    if (GGMLRunner* runner = g_suspended_runner) {
-      runner->pathc_try_stash_condition_hidden_from_active_graph();
-    }
-    pathc_icp_gen_set_condition_clip_graph_finished(true);
-    pathc_icp_dbg("PATHC condition CLIP graph finished; finish embeds on pipeline entry\n");
+  if (GGMLRunner* runner = g_suspended_runner) {
+    runner->pathc_try_stash_phase_output();
+  }
+  switch (pathc_icp_gen_phase()) {
+    case PathcGenPhase::Condition:
+      // Only declare CLIP finished once the hidden states are actually captured.
+      if (pathc_icp_gen_has_pending_clip_hidden()) {
+        pathc_icp_gen_set_condition_clip_graph_finished(true);
+        pathc_icp_dbg("PATHC condition CLIP graph finished; finish embeds on pipeline entry\n");
+      } else {
+        pathc_icp_dbg("PATHC condition complete but CLIP hidden NOT captured; will retry\n");
+      }
+      break;
+    case PathcGenPhase::Denoise:
+      if (pathc_icp_gen_has_pending_unet_output()) {
+        pathc_icp_dbg("PATHC denoise UNet graph output captured at completion\n");
+      } else {
+        pathc_icp_dbg("PATHC denoise complete but UNet output NOT captured; will retry\n");
+      }
+      break;
+    case PathcGenPhase::Decode:
+      if (pathc_icp_gen_has_pending_vae_output()) {
+        pathc_icp_dbg("PATHC decode VAE graph output captured at completion\n");
+      } else {
+        pathc_icp_dbg("PATHC decode complete but VAE output NOT captured; will retry\n");
+      }
+      break;
+    default:
+      break;
   }
   if (GGMLRunner* runner = g_suspended_runner) {
     runner->pathc_release_graph_suspend_latch();
@@ -183,16 +206,42 @@ void pathc_icp_checkpoint_graph_progress(const ggml_cgraph* graph,
     return;
   }
   if (g_graph_resume_target != graph) {
-    pathc_icp_graph_set_resume(const_cast<ggml_cgraph*>(graph), next);
+    if (GGMLRunner* runner = g_suspended_runner) {
+      ggml_cgraph* session = runner->pathc_suspended_graph_ptr();
+      if (session != nullptr && graph == session) {
+        pathc_icp_graph_set_resume(const_cast<ggml_cgraph*>(graph), next);
+      } else {
+        pathc_icp_dbgf("PATHC checkpoint: ignore cursor on graph=%p (session=%p resume=%p)\n",
+                       static_cast<void*>(const_cast<ggml_cgraph*>(graph)),
+                       static_cast<void*>(session),
+                       static_cast<void*>(g_graph_resume_target));
+      }
+    } else {
+      pathc_icp_graph_set_resume(const_cast<ggml_cgraph*>(graph), next);
+    }
   } else if (next > g_graph_resume_node) {
     g_graph_resume_node = next;
   }
 }
 
 int pathc_icp_graph_resume_node(ggml_cgraph* graph) {
-  (void)graph;
   if (g_graph_resume_target == nullptr) {
     return 0;
+  }
+  if (graph != nullptr && graph != g_graph_resume_target) {
+    if (GGMLRunner* runner = g_suspended_runner) {
+      ggml_cgraph* session = runner->pathc_suspended_graph_ptr();
+      if (session != nullptr &&
+          (graph == session || graph == g_graph_resume_target)) {
+        g_graph_resume_target = graph;
+      } else {
+        pathc_icp_dbgf("PATHC resume_node: graph mismatch cur=%p target=%p session=%p -> 0\n",
+                       static_cast<void*>(graph),
+                       static_cast<void*>(g_graph_resume_target),
+                       static_cast<void*>(session));
+        return 0;
+      }
+    }
   }
   return g_graph_resume_node;
 }
@@ -262,6 +311,13 @@ extern "C" bool pathc_icp_no_intermediate_galloc_reuse(void) {
 
 void pathc_icp_enter_graph_suspend(ggml_cgraph* graph, int next_node,
                                    GGMLRunner* runner) {
+  if (graph != nullptr && runner == nullptr) {
+    if (GGMLRunner* suspended = g_suspended_runner) {
+      if (ggml_cgraph* session = suspended->pathc_suspended_graph_ptr()) {
+        graph = session;
+      }
+    }
+  }
   if (graph != nullptr && next_node >= ggml_graph_n_nodes(graph)) {
     pathc_icp_mark_graph_run_complete(graph);
     pathc_icp_dbgf("PATHC graph at end (next=%d n=%d); no pause\n", next_node,

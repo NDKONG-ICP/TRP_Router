@@ -21,8 +21,7 @@ Files under `vendor/stable-diffusion.cpp/`:
 - **`ggml_extend_backend.cpp`:** chunked eval + resume node cursor (direct CPU backend path).
 - **`ggml/src/ggml-backend.cpp`:** sched eval loop: resume `j0`, return `GGML_STATUS_ABORTED` on infer pause; when resume cursor ≥ `n_nodes`, treat graph complete (no 0-slice replay).
 - **`pathc_icp_hooks.*` + `pathc_icp_gen.*`:** when Condition-phase CLIP graph hits `n_nodes`, set `condition_clip_graph_finished`, read CLIP output without cursor replay, then `save_after_embeds` → **Denoise** (fresh resume cursor for UNet).
-- **`ggml_runner.cpp`:** Condition/CLIP graphs append `ggml_cpy` into a host-backed `pathc_icp_clip_host_stash_` sink so chunked raw-path execution can read hidden states at completion; track `pathc_suspended_alloc_graph_` / result node across resume; instrument `execute_graph` + `ComputeWorkspace::allocate` (SKIP pinned vs RUN fresh).
-- **`ggml_runner.cpp`:** `pathc_try_stash_condition_hidden_from_active_graph()` copies CLIP hidden states into `g_pending_clip_hidden` while `compute_ctx` is still live; called from `pathc_icp_mark_graph_run_complete` (Condition) and from eval early-exit when `j0_start >= n_nodes`.
+- **`ggml_runner.cpp`:** Condition/CLIP, Denoise/unet, Decode/vae graphs append `ggml_cpy` into `pathc_icp_host_output_stash_`; `pathc_try_stash_phase_output()` delivers to clip/unet/vae pending stashes; track `pathc_suspended_alloc_graph_` across resume; instrument allocate + execute_graph graph identity.
 - **`ggml_runner.cpp`:** `pathc_read_and_teardown_completed_graph()` when resume cursor cleared at graph end; do not abort/replay from node 0.
 - **`ggml_runner.cpp`:** skip `runner_end` on infer pause; sched `ABORTED` → segment pause; keep `compute_ctx` via existing `GraphEndGuard`.
 - **`pipeline/generation.h`:** skip `ConditionerRunnerEndOnExit` when pause/resume graph active.

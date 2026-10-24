@@ -187,6 +187,8 @@ bool pathc_icp_gen_save_decode_stash(
   g_stash.reset();
   g_phase = PathcGenPhase::Decode;
   pathc_icp_gen_reset_graph_slice_count();
+  pathc_icp_graph_clear_resume_force();
+  pathc_icp_dbg("PATHC enter Decode (latents stashed)\n");
   return true;
 }
 
@@ -256,6 +258,10 @@ bool pathc_icp_gen_stash_pending_unet_output(sd::Tensor<float> tensor) {
   return true;
 }
 
+bool pathc_icp_gen_has_pending_unet_output() {
+  return g_pending_unet_output.has_value();
+}
+
 bool pathc_icp_gen_take_pending_unet_output(sd::Tensor<float>& tensor) {
   if (!g_pending_unet_output.has_value()) {
     return false;
@@ -271,6 +277,10 @@ bool pathc_icp_gen_stash_pending_vae_output(sd::Tensor<float> tensor) {
   }
   g_pending_vae_output.emplace(std::move(tensor));
   return true;
+}
+
+bool pathc_icp_gen_has_pending_vae_output() {
+  return g_pending_vae_output.has_value();
 }
 
 bool pathc_icp_gen_take_pending_vae_output(sd::Tensor<float>& tensor) {
@@ -315,6 +325,19 @@ bool pathc_icp_gen_condition_clip_graph_finished() {
 
 void pathc_icp_gen_clear_condition_clip_graph_finished() {
   g_condition_clip_graph_finished = false;
+}
+
+bool pathc_icp_gen_phase_output_already_pending() {
+  switch (g_phase) {
+    case PathcGenPhase::Condition:
+      return g_pending_clip_hidden.has_value();
+    case PathcGenPhase::Denoise:
+      return g_pending_unet_output.has_value();
+    case PathcGenPhase::Decode:
+      return g_pending_vae_output.has_value();
+    default:
+      return false;
+  }
 }
 
 #endif

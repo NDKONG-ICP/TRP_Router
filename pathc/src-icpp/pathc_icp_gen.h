@@ -81,9 +81,13 @@ bool pathc_icp_gen_stash_pending_clip_hidden(sd::Tensor<float> tensor);
 bool pathc_icp_gen_has_pending_clip_hidden();
 bool pathc_icp_gen_take_pending_clip_hidden(sd::Tensor<float>& tensor);
 bool pathc_icp_gen_stash_pending_unet_output(sd::Tensor<float> tensor);
+bool pathc_icp_gen_has_pending_unet_output();
 bool pathc_icp_gen_take_pending_unet_output(sd::Tensor<float>& tensor);
 bool pathc_icp_gen_stash_pending_vae_output(sd::Tensor<float> tensor);
+bool pathc_icp_gen_has_pending_vae_output();
 bool pathc_icp_gen_take_pending_vae_output(sd::Tensor<float>& tensor);
+/** True when the active phase already has a captured graph output pending delivery. */
+bool pathc_icp_gen_phase_output_already_pending();
 void pathc_icp_gen_save_denoise_x_t(sd::Tensor<float> x_t);
 bool pathc_icp_gen_take_denoise_x_t(sd::Tensor<float>& x_t);
 void pathc_icp_gen_clear_denoise_x_t();
