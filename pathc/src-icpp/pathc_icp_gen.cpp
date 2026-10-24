@@ -50,6 +50,7 @@ std::optional<sd::Tensor<float>> g_pending_vae_output;
 std::optional<sd::Tensor<float>> g_denoise_x_t_stash;
 uint32_t g_graph_slices_phase = 0;
 bool g_condition_clip_graph_finished = false;
+bool g_decode_vae_graph_finished       = false;
 
 }  // namespace
 
@@ -74,6 +75,7 @@ void pathc_icp_gen_reset() {
   g_denoise_x_t_stash.reset();
   g_graph_slices_phase = 0;
   g_condition_clip_graph_finished = false;
+  g_decode_vae_graph_finished       = false;
   g_phase = PathcGenPhase::Idle;
 }
 
@@ -186,6 +188,8 @@ bool pathc_icp_gen_save_decode_stash(
   g_decode_stash.emplace(DecodeStash{final_latents, request, t0});
   g_stash.reset();
   g_phase = PathcGenPhase::Decode;
+  g_decode_vae_graph_finished = false;
+  g_pending_vae_output.reset();
   pathc_icp_gen_reset_graph_slice_count();
   pathc_icp_graph_clear_resume_force();
   pathc_icp_dbg("PATHC enter Decode (latents stashed)\n");
@@ -325,6 +329,18 @@ bool pathc_icp_gen_condition_clip_graph_finished() {
 
 void pathc_icp_gen_clear_condition_clip_graph_finished() {
   g_condition_clip_graph_finished = false;
+}
+
+void pathc_icp_gen_set_decode_vae_graph_finished(bool finished) {
+  g_decode_vae_graph_finished = finished;
+}
+
+bool pathc_icp_gen_decode_vae_graph_finished() {
+  return g_decode_vae_graph_finished;
+}
+
+void pathc_icp_gen_clear_decode_vae_graph_finished() {
+  g_decode_vae_graph_finished = false;
 }
 
 bool pathc_icp_gen_phase_output_already_pending() {

@@ -136,8 +136,10 @@ static void pathc_icp_mark_graph_run_complete(ggml_cgraph* graph) {
       break;
     case PathcGenPhase::Decode:
       if (pathc_icp_gen_has_pending_vae_output()) {
+        pathc_icp_gen_set_decode_vae_graph_finished(true);
         pathc_icp_dbg("PATHC decode VAE graph output captured at completion\n");
       } else {
+        pathc_icp_gen_set_decode_vae_graph_finished(false);
         pathc_icp_dbg("PATHC decode complete but VAE output NOT captured; will retry\n");
       }
       break;

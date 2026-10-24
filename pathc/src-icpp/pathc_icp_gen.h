@@ -100,6 +100,9 @@ void pathc_icp_gen_abort_suspended();
 void pathc_icp_gen_set_condition_clip_graph_finished(bool finished);
 bool pathc_icp_gen_condition_clip_graph_finished();
 void pathc_icp_gen_clear_condition_clip_graph_finished();
+void pathc_icp_gen_set_decode_vae_graph_finished(bool finished);
+bool pathc_icp_gen_decode_vae_graph_finished();
+void pathc_icp_gen_clear_decode_vae_graph_finished();
 
 #else
 
