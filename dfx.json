@@ -23,6 +23,10 @@
       "package": "mock_trp_ledger",
       "candid": "mock_trp_ledger.did"
     },
+    "trp_playground": {
+      "type": "assets",
+      "source": ["dist/playground"]
+    },
     "llama_cpp_qwen25": {
       "type": "custom",
       "wasm": "vendor/llama_cpp_canister/build/llama_cpp.wasm",

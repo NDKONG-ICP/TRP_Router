@@ -1,12 +1,6 @@
 {
-  "name": "trp-router-scripts",
   "private": true,
-  "type": "module",
-  "dependencies": {
-    "@dfinity/agent": "^2.4.1",
-    "@dfinity/candid": "^2.4.1",
-    "@dfinity/identity-secp256k1": "^2.4.1",
-    "@dfinity/identity-secp256k1": "^2.4.1",
-    "@dfinity/principal": "^2.4.1"
+  "scripts": {
+    "build": "node scripts/build-playground-assets.mjs"
   }
 }

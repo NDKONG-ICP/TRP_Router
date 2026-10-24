@@ -10,5 +10,8 @@
   },
   "router_canister": {
     "ic": "5723t-oaaaa-aaaao-bbquq-cai"
+  },
+  "trp_playground": {
+    "ic": "6pjrv-saaaa-aaaao-bbq4q-cai"
   }
 }
