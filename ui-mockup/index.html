@@ -154,6 +154,10 @@ section{padding-block:72px; position:relative}
   -webkit-mask:linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0); -webkit-mask-composite:xor; mask-composite:exclude; opacity:.5}
 .panel-h{display:flex; align-items:center; gap:10px; flex-wrap:wrap; padding:14px 18px; border-bottom:1px solid var(--line-soft); font-family:var(--mono); font-size:12.5px; color:var(--muted)}
 .panel-h .tag{margin-left:auto; font-size:10.5px; letter-spacing:.12em; text-transform:uppercase; padding:3px 8px; border-radius:6px; white-space:nowrap}
+.why-blob{margin:12px 18px 0; padding:12px 14px; border:1px solid rgba(227,183,101,.2); border-left:3px solid #8f86f0; border-radius:10px; background:rgba(143,134,240,.06)}
+.why-blob .h{font-weight:600; font-size:12.5px; color:#f4f1e8}
+.why-blob p{margin:5px 0 0; font-size:12px; line-height:1.55; color:#cfcbdd}
+.why-blob b{color:#e3b765; font-weight:600}
 .tag.off{color:var(--violet); background:rgba(168,133,255,.1); border:1px solid rgba(168,133,255,.25)}
 .tag.on{color:var(--gold); background:rgba(246,204,91,.09); border:1px solid rgba(246,204,91,.3)}
 .panel-b{padding:18px}
@@ -357,6 +361,10 @@ footer{border-top:1px solid var(--line-soft); padding-block:40px; margin-top:40p
     <!-- image -->
     <div class="panel">
       <div class="panel-h">POST&nbsp;/v1/images/generations<span class="tag on">on-chain · raven-diffusion</span></div>
+        <div class="why-blob">
+          <div class="h">✦ Why does it look abstract — not photographic?</div>
+          <p>You're looking at the <b>first Stable Diffusion that runs entirely on-chain</b> — at 64×64 in a single step. At that tiny resolution the output is impressionistic: it pulls <b>color, mood and composition</b> from your prompt, not sharp detail. The breakthrough isn't the picture — it's that <b>no server, GPU or cloud touches it</b>; every pixel is computed and verifiable on the blockchain itself. Higher resolution and multi-step detail are on the roadmap.</p>
+        </div>
       <div class="panel-b">
         <div class="field">
           <input id="imgPrompt" value="a black raven on a branch, silhouette, minimal" aria-label="Image prompt">
