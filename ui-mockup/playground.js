@@ -1,6 +1,12 @@
 (function () {
   const cfg = window.TRP_PLAYGROUND || {};
-  const postBase = cfg.routerPostUrl || "";
+  function postBase() {
+    if (window.TRP && window.TRP.routerPostUrl) {
+      const u = window.TRP.routerPostUrl();
+      if (u) return u;
+    }
+    return (cfg.routerPostUrl || "").replace(/\.icp0\.io\b/, ".raw.icp0.io");
+  }
   const apiKey = cfg.apiKey || "";
   const diffusionId = cfg.diffusionCanisterId || "7chv3-5iaaa-aaaao-bbq3a-cai";
   const moduleSha =
@@ -30,6 +36,43 @@
     }
     if (!apiKey) return {};
     return { "x-oc-api-key": apiKey };
+  }
+
+  /** On-chain image gen via router update (avoids browser HTTP upgrade). */
+  async function generateRavenViaRouter(prompt, seed) {
+    const routerId =
+      cfg.routerCanisterId ||
+      (window.TRP && window.TRP.cfg && window.TRP.cfg().routerCanisterId);
+    if (!routerId) throw new Error("Missing routerCanisterId in config.js");
+    const AGENT_VER = "2.4.1";
+    const { HttpAgent, Actor } = await import(
+      "https://esm.sh/@dfinity/agent@" + AGENT_VER
+    );
+    const { IDL } = await import(
+      "https://esm.sh/@dfinity/candid@" + AGENT_VER
+    );
+    const agent = await HttpAgent.create({ host: "https://icp-api.io" });
+    const idlFactory = ({ IDL }) =>
+      IDL.Service({
+        playground_image_generate: IDL.Func(
+          [IDL.Text, IDL.Text, IDL.Nat64],
+          [IDL.Text],
+          [],
+        ),
+      });
+    const actor = Actor.createActor(idlFactory, { agent, canisterId: routerId });
+    const auth = routerAuthHeaders()["x-oc-api-key"] || apiKey;
+    if (!auth) {
+      throw new Error("Sign in with Internet Identity or configure API key.");
+    }
+    const raw = await actor.playground_image_generate(
+      auth,
+      prompt,
+      BigInt(seed),
+    );
+    const j = JSON.parse(raw);
+    if (j.error) throw new Error(j.error);
+    return j;
   }
 
   function seedForPrompt(prompt, opts) {
@@ -67,6 +110,13 @@
       " --network ic\n# expect module hash 0x" +
       moduleSha
     );
+  }
+
+  function videoLoading(on) {
+    const v = document.getElementById("imgLoading");
+    if (!v) return;
+    v.style.display = on ? "block" : "none";
+    try { if (on) { v.currentTime = 0; v.play(); } else { v.pause(); } } catch (e) {}
   }
 
   function setProgress(text, pct, isError) {
@@ -151,7 +201,7 @@
     if (mintStart) mintStart.hidden = true;
     const mintOutStart = document.getElementById("mintResult");
     if (mintOutStart) mintOutStart.innerHTML = "";
-    if (!postBase) {
+    if (!postBase()) {
       showError("Missing router URL in config.js");
       return;
     }
@@ -167,6 +217,9 @@
     if (seedEl) seedEl.value = String(seed);
 
     running = true;
+    var _lc = document.getElementById("imgC"); if (_lc) _lc.style.display = "none";
+    if (img) img.style.display = "none";
+    videoLoading(true);
     clearError();
     setButtonsDisabled(true);
     setProgress("Generating on-chain… connecting to router", 10, false);
@@ -183,25 +236,7 @@
     }, 400);
 
     try {
-      const res = await fetch(postBase + "/images/generations", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          ...routerAuthHeaders(),
-        },
-        body: JSON.stringify({
-          model: "raven-diffusion",
-          prompt,
-          seed,
-        }),
-      });
-      const j = await res.json().catch(function () {
-        return {};
-      });
-      if (!res.ok) {
-        const errText = j.error || res.statusText || "Generate failed";
-        throw new Error(errText);
-      }
+      const j = await generateRavenViaRouter(prompt, seed);
       const row = (j.data && j.data[0]) || {};
       const b64 = row.b64_json;
       const sha = row.sha256 || "";
@@ -251,7 +286,7 @@
       let msg = String(e.message || e);
       if (/failed to fetch|load failed/i.test(msg)) {
         msg =
-          "Network/CORS error calling the router. Generate uses the playground API key only (not II). Try a hard refresh; if it persists, check config.js routerPostUrl.";
+          "Network error calling the router. Hard refresh; if signed in, confirm II session is active.";
       } else if (/trapped|IC0502|unreachable/i.test(msg)) {
         msg =
           "The diffusion canister (7chv3) is in a bad state and must be restarted by a controller (your Internet Identity). In NNS → Canisters → 7chv3-5iaaa-aaaao-bbq3a-cai: Stop, then Start. Then hard-refresh and try again.";
@@ -265,6 +300,10 @@
       clearInterval(tick);
       running = false;
       setButtonsDisabled(false);
+      videoLoading(false);
+      var _fc = document.getElementById("imgC");
+      var _fo = document.getElementById("imgOut");
+      if (_fc && !(_fo && _fo.style.display === "block")) _fc.style.display = "block";
     }
   }
 

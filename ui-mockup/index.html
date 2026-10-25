@@ -105,6 +105,11 @@ header.nav{position:sticky; top:env(safe-area-inset-top,0px); z-index:30; backdr
 .nft-transfer input{font-size:12px;padding:8px 10px;border-radius:10px;border:1px solid var(--line);background:rgba(0,0,0,.35);color:var(--fg)}
 .nft-transfer-status{font-size:11px;margin:0;min-height:1.2em}
 .nft-empty{font-size:14px;color:var(--muted);margin:12px 0}
+.pack-list{display:flex;flex-direction:column;gap:10px;margin:12px 0}
+.pack-row{display:flex;flex-wrap:wrap;align-items:center;gap:10px;padding:12px;border:1px solid var(--line-soft);border-radius:12px;background:rgba(255,255,255,.02)}
+.pack-row .meta{flex:1;min-width:140px;font-size:13px}
+.pack-row .meta strong{color:var(--gold);font-family:var(--mono);font-size:12px}
+.pack-row .btn{flex-shrink:0}
 .app-tabs{display:flex;gap:8px;flex-wrap:wrap;padding:12px 0 20px;position:sticky;top:56px;z-index:25;background:linear-gradient(to bottom,rgba(9,6,15,.94),rgba(9,6,15,.78));backdrop-filter:blur(10px);margin-bottom:8px}
 .app-tab{font-family:var(--mono);font-size:11px;letter-spacing:.08em;text-transform:uppercase;padding:10px 14px;border-radius:999px;border:1px solid var(--line-soft);background:var(--panel);color:var(--muted);cursor:pointer;transition:border-color .15s,color .15s,background .15s}
 .app-tab.is-active{border-color:rgba(246,204,91,.45);color:var(--gold);background:rgba(246,204,91,.08)}
@@ -137,6 +142,13 @@ details[open]>.acc-summary .acc-chev{transform:rotate(-135deg);margin-top:3px}
 .admin-health-row .badge.warn{color:var(--warn);border-color:rgba(245,178,62,.35)}
 .admin-health-row .badge.muted{color:var(--muted-2)}
 .admin-gate{text-align:center;padding:28px 16px;border:1px dashed var(--line);border-radius:var(--r);margin-top:12px}
+.admin-pay-row{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}
+.admin-refund-row{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.admin-refund-row input{background:var(--panel);border:1px solid var(--line-soft);border-radius:10px;padding:8px 10px;color:var(--fg);font-size:12px}
+.admin-table-wrap{max-height:200px;overflow:auto;border:1px solid var(--line-soft);border-radius:12px;padding:10px}
+.admin-table-row{padding:6px 0;border-bottom:1px solid var(--line-soft)}
+.admin-table-row:last-child{border-bottom:none}
+#adminPaymentsToggle[aria-pressed="true"]{border-color:var(--ok);color:var(--ok)}
 @media(max-width:720px){.stats{grid-template-columns:repeat(2,1fr)}}
 
 /* ---------- sections ---------- */
@@ -225,8 +237,19 @@ section{padding-block:72px; position:relative}
 .wallet-balances{display:grid; gap:10px; margin:14px 0; font-size:12px}
 .wallet-balances .k{display:block; font-size:10px; letter-spacing:.12em; text-transform:uppercase; color:var(--muted-2)}
 .wallet-balances code{word-break:break-all; color:var(--gold)}
+.wallet-token-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,140px),1fr));gap:10px;margin:12px 0}
+.wallet-token-cell{background:var(--panel);border:1px solid var(--line-soft);border-radius:12px;padding:10px 12px}
+.wallet-token-cell .sym{font-family:var(--mono);font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--muted-2)}
+.wallet-token-cell .val{font-family:var(--display);font-size:18px;color:var(--gold);margin-top:4px;font-variant-numeric:tabular-nums}
+.wallet-token-cell.soon .val{font-size:12px;color:var(--muted)}
 .wallet-row{display:flex; gap:10px; flex-wrap:wrap}
 .wallet-field input.seed{max-width:120px}
+.wallet-select,.wallet-input{width:100%;box-sizing:border-box;background:rgba(0,0,0,.35);border:1px solid var(--line);color:var(--fg);border-radius:10px;padding:10px 12px;font-size:13px}
+.wallet-select:focus,.wallet-input:focus{outline:none;border-color:var(--violet);box-shadow:0 0 0 3px rgba(168,133,255,.18)}
+.wallet-send-amount-row{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-top:6px}
+.wallet-send-amount-row .wallet-input{flex:1;min-width:120px}
+.wallet-send-avail{font-size:11px;flex:1 1 100%;order:-1}
+@media (min-width:520px){.wallet-send-avail{flex:1 1 auto;order:0;text-align:right}}
 .msg{max-width:88%; padding:11px 14px; border-radius:13px; font-size:14px}
 .msg.u{align-self:flex-end; background:var(--panel-2); border:1px solid var(--line)}
 .msg.a{align-self:flex-start; background:rgba(124,58,237,.12); border:1px solid rgba(168,133,255,.28)}
@@ -386,6 +409,7 @@ footer{border-top:1px solid var(--line-soft); padding-block:40px; margin-top:40p
         <div class="gen-error" id="genError" hidden></div>
         <div class="img-card">
           <canvas class="img-canvas" id="imgC" width="512" height="512"></canvas>
+          <video id="imgLoading" class="img-canvas" muted loop playsinline preload="auto" style="display:none;object-fit:cover;background:#000"><source src="assets/loading.mp4" type="video/mp4"></video>
           <img id="imgOut" alt="Generated on-chain PNG" width="512" height="512">
           <div class="img-meta">
             <span class="served" id="servedBy">awaiting generate</span>·
@@ -446,14 +470,25 @@ footer{border-top:1px solid var(--line-soft); padding-block:40px; margin-top:40p
       <button type="button" class="btn ghost mini" id="walletRefresh">Refresh</button>
     </div>
     <div class="wallet-balances mono">
-      <div><span class="k">Principal</span><code id="walletPrincipal">—</code></div>
-      <div><span class="k">ICP balance</span><span id="walletIcpBalance">—</span></div>
-      <div><span class="k">Meter credits</span><span id="walletMeterCredits">—</span></div>
+      <div><span class="k">Receive (all tokens)</span><code id="walletPrincipal">—</code>
+        <button type="button" class="btn ghost mini" id="walletCopyPrincipal" style="margin-top:6px">Copy principal</button>
+      </div>
     </div>
-    <h4>Send ICP</h4>
-    <div class="field wallet-field">
-      <input id="walletSendTo" placeholder="Recipient principal" aria-label="Recipient">
-      <input id="walletSendAmount" class="seed" type="number" step="0.0001" placeholder="ICP" aria-label="Amount ICP">
+    <div id="walletTokenGrid" class="wallet-token-grid mono" aria-live="polite"></div>
+    <div class="wallet-balances mono" style="margin-top:10px">
+      <div><span class="k">Meter credits (legacy T-cycle meter)</span><span id="walletMeterCredits">—</span></div>
+    </div>
+    <h4>Send tokens</h4>
+    <p class="muted" style="font-size:13px;margin:0 0 10px">ICRC-1 transfer to any principal (same address you use to receive).</p>
+    <label class="field-label" for="walletSendToken">Token</label>
+    <select id="walletSendToken" class="wallet-select mono" aria-label="Token to send"></select>
+    <label class="field-label" for="walletSendTo" style="margin-top:10px">Recipient</label>
+    <input id="walletSendTo" placeholder="Recipient principal" aria-label="Recipient" class="wallet-input mono">
+    <label class="field-label" for="walletSendAmount" style="margin-top:10px">Amount</label>
+    <div class="wallet-send-amount-row">
+      <input id="walletSendAmount" type="text" inputmode="decimal" autocomplete="off" placeholder="0" aria-label="Amount to send" class="wallet-input mono">
+      <span id="walletSendAvail" class="wallet-send-avail mono muted">Available —</span>
+      <button type="button" class="btn ghost mini" id="walletSendMax">Max</button>
       <button type="button" class="btn primary mini" id="walletSendBtn">Send</button>
     </div>
     <p class="mono muted" id="walletSendStatus"></p>
@@ -464,6 +499,13 @@ footer{border-top:1px solid var(--line-soft); padding-block:40px; margin-top:40p
       <button type="button" class="btn primary mini" id="walletDepositBtn">Deposit</button>
     </div>
     <p class="mono muted" id="walletDepositStatus"></p>
+    <h4>Buy generation credits</h4>
+    <p class="muted" style="font-size:13px;margin:0 0 8px">Pay with ICP from your II ledger account (fund via NNS or an exchange first). One credit = one on-chain Raven Diffusion image.</p>
+    <div class="wallet-balances mono">
+      <div><span class="k">Paid credits</span><span id="walletPayCredits">—</span></div>
+    </div>
+    <div id="walletPackList" class="pack-list" aria-live="polite"></div>
+    <p class="mono muted" id="walletBuyStatus"></p>
     <h4>Your NFTs</h4>
     <p class="muted" style="font-size:13px;margin:0 0 8px">ICRC-7 Raven Diffusion tokens tied to your Internet Identity.</p>
     <div id="walletNftGrid" class="nft-grid" aria-live="polite"></div>
@@ -498,6 +540,46 @@ footer{border-top:1px solid var(--line-soft); padding-block:40px; margin-top:40p
       <div class="admin-charts">
         <div class="admin-chart-card"><h5>Generations (session)</h5><div class="admin-chart-wrap"><canvas id="adminGenChart" aria-label="Generations sparkline"></canvas></div></div>
         <div class="admin-chart-card"><h5>Cycles burned TC (session)</h5><div class="admin-chart-wrap"><canvas id="adminCycChart" aria-label="Cycles sparkline"></canvas></div></div>
+      </div>
+      <h4 style="margin-top:22px">Payments & treasury (trp_pay)</h4>
+      <div class="admin-pay-panel panel" style="margin-top:10px">
+        <div class="panel-b">
+          <p class="muted" style="font-size:13px;margin:0 0 12px">Pack ICP splits: <strong>cycles burn</strong> (CMC → diffusion) + remainder to your configured <strong>treasury principal</strong> (II ledger account — not Plug). Stuck ICP on trp_pay: sweep or refund below. Future TRP routing will use the same treasury field.</p>
+          <div class="admin-tiles" style="margin-bottom:12px">
+            <div class="admin-tile"><div class="n" id="adminTreasuryIcp">—</div><div class="l">ICP on treasury principal</div></div>
+            <div class="admin-tile"><div class="n mono" id="adminTreasuryId" style="font-size:11px;word-break:break-all">—</div><div class="l">Treasury principal</div></div>
+          </div>
+          <div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:12px">
+            <button type="button" class="btn primary mini" id="adminTreasuryToII">Treasury → my II</button>
+            <input type="text" id="adminTreasuryInput" placeholder="Treasury principal" class="mono" style="flex:1;min-width:180px;background:var(--panel);border:1px solid var(--line-soft);border-radius:10px;padding:8px 10px;color:var(--fg);font-size:12px"/>
+            <button type="button" class="btn ghost mini" id="adminTreasurySet">Set treasury</button>
+          </div>
+          <div class="admin-pay-row">
+            <span>ICP purchases enabled</span>
+            <button type="button" class="btn ghost mini" id="adminPaymentsToggle" aria-pressed="false">—</button>
+          </div>
+          <div class="admin-tiles" style="margin-top:12px">
+            <div class="admin-tile"><div class="n" id="adminPayCanisterIcp">—</div><div class="l">ICP on trp_pay (refundable)</div></div>
+            <div class="admin-tile"><div class="n" id="adminCyclesSlice">—</div><div class="l">Burn slice e8s / credit</div></div>
+          </div>
+          <div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:12px">
+            <button type="button" class="btn ghost mini" id="adminSweepTreasury">Sweep ICP → treasury</button>
+            <button type="button" class="btn ghost mini" id="adminRefreshPay">Refresh payments</button>
+          </div>
+          <p class="mono muted" id="adminPayStatus" style="font-size:11px;margin-top:10px"></p>
+          <h5 style="margin:18px 0 8px;font-family:var(--mono);font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--muted-2)">Refund / support</h5>
+          <div class="admin-refund-row">
+            <input type="text" id="adminRefundPrincipal" placeholder="User principal" class="mono" style="flex:1;min-width:200px"/>
+            <input type="number" id="adminRefundIcp" placeholder="ICP" step="0.0001" style="width:90px"/>
+            <button type="button" class="btn primary mini" id="adminRefundBtn">Refund ICP</button>
+            <input type="number" id="adminGrantCredits" placeholder="Credits" step="1" style="width:80px"/>
+            <button type="button" class="btn ghost mini" id="adminGrantBtn">Grant credits</button>
+          </div>
+          <h5 style="margin:18px 0 8px;font-family:var(--mono);font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--muted-2)">Credit balances</h5>
+          <div id="adminCreditList" class="admin-table-wrap mono muted" style="font-size:12px">—</div>
+          <h5 style="margin:18px 0 8px;font-family:var(--mono);font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--muted-2)">Recent purchases</h5>
+          <div id="adminPurchaseList" class="admin-table-wrap mono muted" style="font-size:12px">—</div>
+        </div>
       </div>
       <h4 style="margin-top:22px">Router & diffusion health</h4>
       <div id="adminHealthList"></div>
