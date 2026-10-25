@@ -300,6 +300,13 @@
     return authIdentity;
   }
 
+  async function sha256Hex(bytes) {
+    const buf = await crypto.subtle.digest("SHA-256", bytes);
+    return Array.from(new Uint8Array(buf))
+      .map((b) => b.toString(16).padStart(2, "0"))
+      .join("");
+  }
+
   function b64ToBytes(b64) {
     const bin = atob(b64);
     const bytes = new Uint8Array(bin.length);
@@ -342,10 +349,10 @@
       if (!identity) throw new Error("Internet Identity sign-in required to mint.");
       if (btn) btn.textContent = "Minting on-chain…";
       const agentMod = await import(
-        "https://cdn.jsdelivr.net/npm/@dfinity/agent/+esm"
+        "https://cdn.jsdelivr.net/npm/@dfinity/agent@2.4.1/+esm"
       );
       const candidMod = await import(
-        "https://cdn.jsdelivr.net/npm/@dfinity/candid/+esm"
+        "https://cdn.jsdelivr.net/npm/@dfinity/candid@2.4.1/+esm"
       );
       const agent = await agentMod.HttpAgent.create({
         identity,
@@ -355,11 +362,12 @@
         agent,
         canisterId: nftCanisterId,
       });
+      const mintSha = await sha256Hex(lastImageBytes);
       const res = await actor.mint({
         prompt: lastRun.prompt,
         seed: BigInt(lastRun.seed),
         module_hash: moduleSha,
-        sha256: lastRun.sha,
+        sha256: mintSha,
         image: Array.from(lastImageBytes),
         to: [],
       });
@@ -381,7 +389,10 @@
         btn.disabled = true;
       }
     } catch (e) {
-      const msg = String(e.message || e);
+      console.error("mint error:", e);
+      const msg = String(
+        (e && e.message) || (e && e.reject_message) || (e && e.detail) || e
+      );
       if (out) out.innerHTML = '<span class="err">Mint failed: ' + msg + "</span>";
       if (btn) {
         btn.disabled = false;
