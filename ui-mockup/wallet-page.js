@@ -100,7 +100,7 @@
   async function agentWithII() {
     const { HttpAgent } = await import(agentUrl);
     const { AuthClient } = await import(
-      "https://esm.sh/@dfinity/auth-client@" + AGENT_VER
+      "https://esm.sh/@dfinity/auth-client@" + AGENT_VER + "?alias=@dfinity/candid:@dfinity/candid@" + AGENT_VER
     );
     let { authIdentity, principal } = window.TRP.getII();
     if (!authIdentity) {

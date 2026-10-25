@@ -44,7 +44,7 @@
       return { authClient, authIdentity, principal: iiPrincipal };
     }
     const { AuthClient } = await import(
-      "https://esm.sh/@dfinity/auth-client@2.4.1"
+      "https://esm.sh/@dfinity/auth-client@2.4.1?alias=@dfinity/candid:@dfinity/candid@2.4.1"
     );
     authClient = await AuthClient.create();
     if (!(await authClient.isAuthenticated())) {
@@ -64,7 +64,7 @@
   async function restoreII() {
     try {
       const { AuthClient } = await import(
-        "https://esm.sh/@dfinity/auth-client@2.4.1"
+        "https://esm.sh/@dfinity/auth-client@2.4.1?alias=@dfinity/candid:@dfinity/candid@2.4.1"
       );
       authClient = await AuthClient.create();
       if (await authClient.isAuthenticated()) {
