@@ -2,10 +2,8 @@
 
 use candid::{Nat, Principal};
 use ic_cdk::api::time;
-use ic_stable_structures::{
-    memory_manager::{MemoryId, MemoryManager, VirtualMemory},
-    DefaultMemoryImpl, StableBTreeMap, Storable,
-};
+use crate::mem::{vmem, Memory};
+use ic_stable_structures::{StableBTreeMap, Storable};
 use std::borrow::Cow;
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -15,7 +13,6 @@ pub const PAYMENTS_ENABLED: bool = false;
 /// Oracle staleness: fail-closed after 1h without refresh (local tests call refresh_oracle).
 const ORACLE_TTL_NS: u64 = 3_600_000_000_000;
 
-type Memory = VirtualMemory<DefaultMemoryImpl>;
 
 #[derive(Clone, candid::CandidType, serde::Serialize, serde::Deserialize)]
 struct Credits {
@@ -70,10 +67,8 @@ storable_wrapper!(FlagByte);
 storable_wrapper!(HolderDaily);
 
 thread_local! {
-    static MEMORY_MANAGER: RefCell<MemoryManager<DefaultMemoryImpl>> =
-        RefCell::new(MemoryManager::init(DefaultMemoryImpl::default()));
     static LEDGER: RefCell<StableBTreeMap<Principal, Credits, Memory>> = RefCell::new(
-        StableBTreeMap::init(MEMORY_MANAGER.with(|m| m.borrow().get(MemoryId::new(20))))
+        StableBTreeMap::init(vmem(20))
     );
     static ORACLE: RefCell<OracleState> = RefCell::new(OracleState {
         usd_per_credit_micro: 10_000, // $0.01 per credit (utility unit, not a price claim)
@@ -81,14 +76,14 @@ thread_local! {
         updated_at_ns: 0,
     });
     static STAKED: RefCell<StableBTreeMap<Principal, StakeAmt, Memory>> = RefCell::new(
-        StableBTreeMap::init(MEMORY_MANAGER.with(|m| m.borrow().get(MemoryId::new(21))))
+        StableBTreeMap::init(vmem(21))
     );
     static BYOK: RefCell<StableBTreeMap<Principal, FlagByte, Memory>> = RefCell::new(
-        StableBTreeMap::init(MEMORY_MANAGER.with(|m| m.borrow().get(MemoryId::new(22))))
+        StableBTreeMap::init(vmem(22))
     );
     static HOLDER_FREE: RefCell<StableBTreeMap<Principal, HolderDaily, Memory>> =
         RefCell::new(StableBTreeMap::init(
-            MEMORY_MANAGER.with(|m| m.borrow().get(MemoryId::new(23))),
+            vmem(23),
         ));
     static ANTHROPIC_BYOK: RefCell<HashMap<Principal, String>> = RefCell::new(HashMap::new());
 }

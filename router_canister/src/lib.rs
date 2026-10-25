@@ -3,6 +3,7 @@ mod chat_providers;
 mod diffusion_cache;
 mod image_providers;
 mod image_quota;
+mod mem;
 mod meter_client;
 mod mcp;
 mod models;
@@ -427,6 +428,7 @@ async fn handle_raven_diffusion(
             return json_response(502, &format!(r#"{{"error":"{e}"}}"#));
         }
     };
+    image_quota::record_generation();
     if let (Some(m), Some(j)) = (meter, job_id) {
         if let Err(e) = meter_client::settle_job(m, j).await {
             return json_response(502, &format!(r#"{{"error":"meter settle: {e}"}}"#));
@@ -775,3 +777,23 @@ fn http_request(req: HttpRequest) -> HttpResponse {
 }
 
 ic_cdk::export_candid!();
+
+#[derive(candid::CandidType)]
+struct GenStats {
+    total_generations: u64,
+    cycles_per_image: u64,
+    cycles_burned_est: candid::Nat,
+}
+
+/// Public, verifiable usage stats: lifetime on-chain generations and an estimate
+/// of cycles burned powering them (count x measured ~0.153 TC per 64x64 image).
+#[ic_cdk::query]
+fn generation_stats() -> GenStats {
+    let total = image_quota::generation_total();
+    let per: u64 = 153_000_000_000; // measured cycles per 64x64 image
+    GenStats {
+        total_generations: total,
+        cycles_per_image: per,
+        cycles_burned_est: candid::Nat::from(total as u128 * per as u128),
+    }
+}

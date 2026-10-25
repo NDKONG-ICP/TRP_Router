@@ -50,4 +50,5 @@ service : {
   dev_exercise_m6_stake : (nat) -> (nat);
   dev_exercise_m6_byok : (bool) -> (nat);
   dev_exercise_m6_holder : (nat32) -> (bool);
+  generation_stats : () -> (record { total_generations : nat64; cycles_per_image : nat64; cycles_burned_est : nat }) query;
 };

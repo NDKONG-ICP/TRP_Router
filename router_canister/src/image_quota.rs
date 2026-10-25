@@ -1,15 +1,12 @@
+use crate::mem::{vmem, Memory};
 use candid::Principal;
-use ic_stable_structures::{
-    memory_manager::{MemoryId, MemoryManager, VirtualMemory},
-    DefaultMemoryImpl, StableBTreeMap, Storable,
-};
+use ic_stable_structures::{StableBTreeMap, StableCell, Storable};
 use std::borrow::Cow;
 use std::cell::RefCell;
 
-type Memory = VirtualMemory<DefaultMemoryImpl>;
-
 /// Free tier for on-chain Raven Diffusion (BETA — Phase 2: trp_meter prepaid credits).
-pub const RAVEN_DIFFUSION_DAILY_MAX: u32 = 10;
+/// Shared across anonymous Playground users (keyed to the API-key principal); II users get their own.
+pub const RAVEN_DIFFUSION_DAILY_MAX: u32 = 50;
 
 #[derive(Clone, candid::CandidType, serde::Serialize, serde::Deserialize)]
 struct DayCount {
@@ -28,12 +25,42 @@ impl Storable for DayCount {
         ic_stable_structures::storable::Bound::Unbounded;
 }
 
+#[derive(Clone, Copy, Default, candid::CandidType, serde::Serialize, serde::Deserialize)]
+struct GenTotal(u64);
+impl Storable for GenTotal {
+    fn to_bytes(&self) -> Cow<[u8]> {
+        Cow::Owned(self.0.to_le_bytes().to_vec())
+    }
+    fn from_bytes(bytes: Cow<[u8]>) -> Self {
+        let mut a = [0u8; 8];
+        a.copy_from_slice(&bytes[..8]);
+        GenTotal(u64::from_le_bytes(a))
+    }
+    const BOUND: ic_stable_structures::storable::Bound =
+        ic_stable_structures::storable::Bound::Bounded { max_size: 8, is_fixed_size: true };
+}
+
 thread_local! {
-    static MEMORY_MANAGER: RefCell<MemoryManager<DefaultMemoryImpl>> =
-        RefCell::new(MemoryManager::init(DefaultMemoryImpl::default()));
-    static DIFFUSION_DAILY: RefCell<StableBTreeMap<Principal, DayCount, Memory>> = RefCell::new(
-        StableBTreeMap::init(MEMORY_MANAGER.with(|m| m.borrow().get(MemoryId::new(21))))
-    );
+    // MemoryId 30 (was 21, which collided with payments::STAKED under a second
+    // MemoryManager); now from the single shared manager in crate::mem.
+    static DIFFUSION_DAILY: RefCell<StableBTreeMap<Principal, DayCount, Memory>> =
+        RefCell::new(StableBTreeMap::init(vmem(30)));
+    // Global lifetime counter of on-chain Raven Diffusion generations served.
+    static GEN_TOTAL: RefCell<StableCell<GenTotal, Memory>> =
+        RefCell::new(StableCell::init(vmem(31), GenTotal(0)).expect("init gen total"));
+}
+
+/// Record one successful on-chain generation (cache miss that burned cycles).
+pub fn record_generation() {
+    GEN_TOTAL.with(|c| {
+        let next = c.borrow().get().0.saturating_add(1);
+        let _ = c.borrow_mut().set(GenTotal(next));
+    });
+}
+
+/// Lifetime count of on-chain generations served.
+pub fn generation_total() -> u64 {
+    GEN_TOTAL.with(|c| c.borrow().get().0)
 }
 
 fn utc_day_ns() -> u64 {
