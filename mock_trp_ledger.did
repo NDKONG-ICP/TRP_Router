@@ -13,9 +13,36 @@ type TransferError = variant {
 };
 type TransferResult = variant { Ok : nat; Err : TransferError };
 
+type ApproveArgs = record {
+  from_subaccount : opt vec nat8; spender : Account; amount : nat;
+  expected_allowance : opt nat; expires_at : opt nat64; fee : opt nat;
+  memo : opt vec nat8; created_at_time : opt nat64;
+};
+type ApproveError = variant {
+  InsufficientFunds : record { balance : nat };
+  GenericError : record { error_code : nat; message : text };
+};
+type ApproveResult = variant { Ok : nat; Err : ApproveError };
+type AllowanceArgs = record { account : Account; spender : Account };
+type Allowance = record { allowance : nat; expires_at : opt nat64 };
+type TransferFromArgs = record {
+  spender_subaccount : opt vec nat8; from : Account; to : Account; amount : nat;
+  fee : opt nat; memo : opt vec nat8; created_at_time : opt nat64;
+};
+type TransferFromError = variant {
+  InsufficientFunds : record { balance : nat };
+  InsufficientAllowance : record { allowance : nat };
+  BadFee : record { expected_fee : nat };
+  GenericError : record { error_code : nat; message : text };
+};
+type TransferFromResult = variant { Ok : nat; Err : TransferFromError };
+
 service : {
   init_test_balances : (principal) -> ();
   icrc1_balance_of : (Account) -> (nat) query;
   icrc1_fee : () -> (nat) query;
   icrc1_transfer : (TransferArg) -> (TransferResult);
+  icrc2_approve : (ApproveArgs) -> (ApproveResult);
+  icrc2_allowance : (AllowanceArgs) -> (Allowance) query;
+  icrc2_transfer_from : (TransferFromArgs) -> (TransferFromResult);
 };
