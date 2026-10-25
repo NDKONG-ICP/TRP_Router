@@ -53,6 +53,19 @@ const ledgerIdl = ({ IDL }) => {
 
 const payIdl = ({ IDL }) =>
   IDL.Service({
+    quote: IDL.Func(
+      [],
+      [
+        IDL.Vec(
+          IDL.Record({
+            index: IDL.Nat32,
+            icp_e8s: IDL.Nat64,
+            credits: IDL.Nat64,
+          }),
+        ),
+      ],
+      ["query"],
+    ),
     buy_credits: IDL.Func(
       [IDL.Nat32],
       [IDL.Variant({ Ok: IDL.Nat64, Err: IDL.Text })],
@@ -86,12 +99,19 @@ const acct = { owner: identity.getPrincipal(), subaccount: [] };
 const bal = await ledger.icrc1_balance_of(acct);
 console.log("caller balance e8s:", bal.toString());
 
-const packIcpE8s = 100_000_000n;
+const PACK_INDEX = Number(process.env.PACK_INDEX ?? "0");
+const packs = await pay.quote();
+const pack = packs.find((p) => Number(p.index) === PACK_INDEX);
+if (!pack) {
+  console.error(`No pack index ${PACK_INDEX} in quote()`);
+  process.exit(2);
+}
+const packIcpE8s = BigInt(pack.icp_e8s);
 const fee = BigInt(await ledger.icrc1_fee());
 const need = packIcpE8s + fee;
 if (bal < need) {
   console.error(
-    `Need at least ${need} e8s (~1 ICP + fee) on ${identity.getPrincipal().toText()}; have ${bal}`,
+    `Need at least ${need} e8s on ${identity.getPrincipal().toText()}; have ${bal}`,
   );
   process.exit(2);
 }
@@ -111,7 +131,8 @@ if ("Err" in approveRes) {
 }
 console.log("approve block", approveRes.Ok.toString());
 
-const buy = await pay.buy_credits(0);
+console.log("pack", PACK_INDEX, "icp_e8s", packIcpE8s.toString());
+const buy = await pay.buy_credits(PACK_INDEX);
 if ("Err" in buy) {
   console.error("buy_credits failed", buy.Err);
   process.exit(1);

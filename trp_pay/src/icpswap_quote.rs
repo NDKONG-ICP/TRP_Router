@@ -95,7 +95,21 @@ pub async fn pool_quote(
     }
 }
 
+fn ceil_div(a: u128, b: u128) -> u128 {
+    if b == 0 {
+        return 0;
+    }
+    (a + (b - 1)) / b
+}
+
 /// Token amount (base units) to pay so that selling it on the pool yields at least `icp_e8s` ICP out.
+///
+/// Rate-based inversion: a bounded exponential probe finds one `(amount, out)` point at or above
+/// the target, then we invert linearly and refine. This replaces the old per-bit binary search,
+/// which issued ~40 sequential inter-canister pool calls (~2.5 min per quote) and got slower the
+/// larger the token's base-unit magnitude (worst for 18-decimal ckETH). This version is
+/// magnitude-independent: ~3–5 pool calls for any token (ckBTC/ckETH/ckUSDC alike). The result is
+/// always verified to yield at least `target` ICP out, so it never under-prices a pack.
 pub async fn token_amount_for_icp_value(
     pool: Principal,
     _token_ledger: Principal,
@@ -106,27 +120,40 @@ pub async fn token_amount_for_icp_value(
         return Err("zero ICP pack price".to_string());
     }
     let target = icp_e8s as u128;
-    // Upper bound: start at 1 ICP-equivalent in token base if unknown — use generous high search.
-    let mut hi: u128 = target.saturating_mul(1_000_000).max(1_000_000);
-    let mut out = pool_quote(pool, hi, zero_for_one).await.unwrap_or(0);
-    while out < target && hi < u128::MAX / 2 {
-        hi = hi.saturating_mul(2);
-        out = pool_quote(pool, hi, zero_for_one).await?;
-    }
-    if out < target {
-        return Err("pool liquidity too low for pack price".to_string());
-    }
-    let mut lo: u128 = 0;
-    while lo + 1 < hi {
-        let mid = lo + (hi - lo) / 2;
-        let q = pool_quote(pool, mid, zero_for_one).await?;
-        if q >= target {
-            hi = mid;
-        } else {
-            lo = mid;
+
+    // 1) Bounded exponential probe: grow the input x256 until the pool returns at least `target`
+    //    ICP out (or we exhaust a sane ceiling). Few steps even for 18-decimal tokens.
+    let mut probe: u128 = 1;
+    let mut out: u128 = pool_quote(pool, probe, zero_for_one).await.unwrap_or(0);
+    let mut steps = 0;
+    while out < target {
+        if probe > u128::MAX / 256 || steps >= 14 {
+            return Err("pool liquidity too low for pack price".to_string());
         }
+        probe = probe.saturating_mul(256);
+        out = pool_quote(pool, probe, zero_for_one).await?;
+        steps += 1;
     }
-    Ok(hi)
+    if out == 0 {
+        return Err("pool returned zero out for probe".to_string());
+    }
+
+    // 2) Linear inversion from the probe rate: est ~= probe * target / out (round up).
+    let mut est = ceil_div(probe.saturating_mul(target), out).max(1);
+
+    // 3) Refine: re-quote at the estimate; if it under-delivers (price impact / rounding), scale up
+    //    by the shortfall ratio and re-quote. At most a few corrections, each guaranteed to grow est.
+    let mut got = pool_quote(pool, est, zero_for_one).await?;
+    let mut tries = 0;
+    while got < target {
+        if tries >= 4 {
+            return Err("could not converge quote to pack price".to_string());
+        }
+        est = ceil_div(est.saturating_mul(target), got.max(1)).saturating_add(1);
+        got = pool_quote(pool, est, zero_for_one).await?;
+        tries += 1;
+    }
+    Ok(est)
 }
 
 /// Fixed-rate stub for local replica when pool is unset (admin `stub_token_base_per_icp_e8`).

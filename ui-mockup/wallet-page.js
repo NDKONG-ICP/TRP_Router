@@ -45,6 +45,9 @@
   let buyPaymentTokens = [{ symbol: "ICP", ledger: ICP_LEDGER, decimals: 8 }];
   /** pack index -> token quote nat string */
   let packTokenQuotes = {};
+  /** cached pay actor + packs so token switches re-render without a full reload */
+  let _payActor = null;
+  let _packsCache = null;
 
   function ledgerBySymbol(sym) {
     const w = WALLET_TOKENS.find(function (t) {
@@ -208,6 +211,16 @@
     frac = frac.replace(/0+$/, "");
     const out = frac ? whole + "." + frac : whole;
     return (neg ? "-" : "") + out;
+  }
+
+  // Compact value for the balance tiles so long 18-decimal amounts (e.g. ckETH)
+  // don't overflow their cell. Full precision is still used for Send amounts.
+  function formatTokenDisplay(raw, decimals) {
+    const full = formatTokenAmount(raw, decimals);
+    const dot = full.indexOf(".");
+    if (dot < 0) return full;
+    const frac = full.slice(dot + 1, dot + 1 + 8).replace(/0+$/, "");
+    return frac ? full.slice(0, dot) + "." + frac : full.slice(0, dot);
   }
 
   function renderTokenGrid(rows) {
@@ -409,7 +422,7 @@
             return {
               symbol: t.symbol,
               label: t.label,
-              value: formatted,
+              value: formatTokenDisplay(balBig, dec),
             };
           } catch (err) {
             return {
@@ -487,6 +500,7 @@
 
   function initBuyTokenSelect() {
     if (!buyTokenSelect) return;
+    const prev = buyTokenSelect.value; // preserve the user's choice across rebuild
     buyTokenSelect.innerHTML = "";
     buyPaymentTokens.forEach(function (t) {
       const opt = document.createElement("option");
@@ -494,17 +508,28 @@
       opt.textContent = t.symbol;
       buyTokenSelect.appendChild(opt);
     });
+    if (
+      prev &&
+      buyPaymentTokens.some(function (t) {
+        return t.symbol === prev;
+      })
+    ) {
+      buyTokenSelect.value = prev;
+    }
   }
 
   async function fetchBuyPaymentTokens(pay) {
-    buyPaymentTokens = [{ symbol: "ICP", ledger: ICP_LEDGER, decimals: 8 }];
+    // Build into a local array first so concurrent calls can't interleave their
+    // pushes onto the shared list (that race produced duplicate dropdown options).
+    const next = [{ symbol: "ICP", ledger: ICP_LEDGER, decimals: 8 }];
     try {
       const listed = await pay.list_payment_tokens();
       listed.forEach(function (t) {
         if (!t.enabled) return;
         const sym = String(t.symbol);
         if (sym.toUpperCase() === "ICP") return;
-        buyPaymentTokens.push({
+        if (next.some(function (x) { return x.symbol === sym; })) return; // dedupe
+        next.push({
           symbol: sym,
           ledger: t.ledger.toString(),
           decimals: Number(t.decimals),
@@ -513,22 +538,42 @@
     } catch (_) {
       /* older trp_pay */
     }
+    buyPaymentTokens = next;
     initBuyTokenSelect();
   }
 
   async function refreshPackQuotes(pay, packs) {
     packTokenQuotes = {};
     const sym = buyTokenSelect?.value || "ICP";
-    if (sym === "ICP") return;
-    for (const p of packs) {
-      try {
-        const q = await pay.quote_token(Number(p.index), sym);
-        if ("Ok" in q) {
-          packTokenQuotes[p.index] = q.Ok;
-        }
-      } catch (_) {
-        /* skip */
-      }
+    if (sym === "ICP" || !packs.length) return;
+    // One reference quote, then scale the other packs linearly. The actual purchase
+    // re-quotes the exact pack, so this is a display estimate — but it replaces ~6
+    // sequential ~15s update calls with a single one, so the labels fill in promptly.
+    // Prefer the smallest pack that is >= 1 ICP: good precision and reliably quotable
+    // (a tiny pack would amplify rounding; a huge one can exceed thin-pool depth).
+    const MIN_REF = 100_000_000n; // 1 ICP
+    let ref = null;
+    packs.forEach(function (p) {
+      const icp = BigInt(p.icp_e8s);
+      if (icp >= MIN_REF && (!ref || icp < BigInt(ref.icp_e8s))) ref = p;
+    });
+    if (!ref) {
+      ref = packs.reduce(function (a, b) {
+        return BigInt(a.icp_e8s) >= BigInt(b.icp_e8s) ? a : b;
+      }, packs[0]);
+    }
+    try {
+      const q = await pay.quote_token(Number(ref.index), sym);
+      if (!("Ok" in q)) return;
+      const refAmt = BigInt(q.Ok.token_amount);
+      const refIcp = BigInt(ref.icp_e8s);
+      if (refIcp === 0n) return;
+      packs.forEach(function (p) {
+        const amt = (refAmt * BigInt(p.icp_e8s) + refIcp - 1n) / refIcp; // ceil
+        packTokenQuotes[p.index] = { token_amount: amt };
+      });
+    } catch (_) {
+      /* skip — labels stay as the loading placeholder */
     }
   }
 
@@ -537,7 +582,7 @@
       return (Number(p.icp_e8s) / 1e8).toFixed(2) + " ICP";
     }
     const q = packTokenQuotes[p.index];
-    if (!q) return "… " + sym;
+    if (!q) return "quoting " + sym + "…";
     const dec =
       buyPaymentTokens.find(function (t) {
         return t.symbol === sym;
@@ -545,10 +590,8 @@
     return formatTokenAmount(q.token_amount, dec) + " " + sym;
   }
 
-  async function renderPackList(pay, packs) {
+  function paintPacks(packs, sym) {
     if (!packList) return;
-    await refreshPackQuotes(pay, packs);
-    const sym = buyTokenSelect?.value || "ICP";
     packList.innerHTML = "";
     packs.forEach(function (p) {
       const row = document.createElement("div");
@@ -571,6 +614,23 @@
     });
   }
 
+  async function renderPackList(pay, packs) {
+    if (!packList) return;
+    const sym = buyTokenSelect?.value || "ICP";
+    // Drop the previous token's quotes so the instant paint shows a "quoting…"
+    // placeholder rather than the old numbers reformatted with the new decimals.
+    if (sym !== "ICP") packTokenQuotes = {};
+    // Paint right away so a token switch gives instant feedback (ICP is exact;
+    // tokens show a "quoting…" placeholder until the quote returns).
+    paintPacks(packs, sym);
+    if (sym === "ICP") return;
+    await refreshPackQuotes(pay, packs);
+    // Repaint with real token prices — unless the user has since switched tokens.
+    if ((buyTokenSelect?.value || "ICP") === sym) {
+      paintPacks(packs, sym);
+    }
+  }
+
   async function loadPacks() {
     if (!packList) return;
     const pid = payId();
@@ -585,10 +645,22 @@
       const pay = Actor.createActor(payIdlFactory, { agent, canisterId: pid });
       await fetchBuyPaymentTokens(pay);
       const packs = await pay.quote();
+      _payActor = pay;
+      _packsCache = packs;
       await renderPackList(pay, packs);
     } catch (e) {
       packList.innerHTML =
         '<p class="nft-empty err">' + escapeHtml(String(e.message || e)) + "</p>";
+    }
+  }
+
+  // Token switch: re-quote + re-render packs for the chosen symbol only — do NOT
+  // reload the token list or rebuild the dropdown (that reset the selection).
+  async function renderPacksForSelectedToken() {
+    if (_payActor && _packsCache) {
+      await renderPackList(_payActor, _packsCache);
+    } else {
+      await loadPacks();
     }
   }
 
@@ -932,7 +1004,7 @@
 
   initSendTokenSelect();
   buyTokenSelect?.addEventListener("change", function () {
-    loadPacks();
+    renderPacksForSelectedToken();
   });
 
   const meterLabel = document.getElementById("walletMeterId");

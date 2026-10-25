@@ -94,22 +94,31 @@
 
     $all("h4", root).slice().forEach(function (h4) {
       const title = h4.textContent.trim();
+      // Collect this section's content: following siblings until the next h4.
+      // Stop at any already-built accordion so a later section can't swallow an
+      // earlier one (that nesting put Buy credits inside the Your-NFTs tile).
       const nodes = [];
       let n = h4.nextElementSibling;
-      while (n && n.tagName !== "H4") {
+      while (n && n.tagName !== "H4" && !n.classList.contains("acc-tile")) {
         nodes.push(n);
         n = n.nextElementSibling;
       }
       const acc = makeAccordion(title, false);
-      if (title.toLowerCase().indexOf("nft") >= 0) {
+      const lt = title.toLowerCase();
+      if (lt.indexOf("nft") >= 0) {
         delete acc.details.dataset.accDefault;
         acc.details.dataset.accMobileOpen = "false";
+      } else if (lt.indexOf("buy generation") >= 0) {
+        // Keep the credits shop open by default (incl. mobile) so it's easy to find.
+        acc.details.dataset.accDefault = "open";
+        acc.details.dataset.accMobileOpen = "true";
       }
-      h4.remove();
+      // Place the accordion where the h4 was so sections keep their order (instead
+      // of appending to the end, which let the last section absorb the rest).
+      h4.replaceWith(acc.details);
       nodes.forEach(function (node) {
         acc.body.appendChild(node);
       });
-      root.appendChild(acc.details);
     });
 
     root.dataset.accWrapped = "1";

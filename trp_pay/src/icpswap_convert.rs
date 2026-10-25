@@ -249,27 +249,49 @@ pub async fn swap_token_to_icp(p: SwapToIcpParams) -> Result<u64, String> {
     let token_fee = icrc1_fee(p.token_ledger).await?;
     let icp_fee = icrc1_fee(p.icp_ledger).await?;
 
+    // Deposit what this canister actually HOLDS, minus the deposit's own ledger fee.
+    // The pool's depositFrom does an icrc2_transfer_from of `amount + fee` from us, so
+    // we must hold amount + fee. We only ever hold (pulled token_amount - fee), so
+    // depositing the nominal token_amount was always exactly one fee short and every
+    // swap failed. Using the live balance self-corrects (and sweeps any prior residue,
+    // which is what admin_retry_conversion relies on to recover stranded tokens).
+    let self_acct = Account { owner: ic_cdk::id(), subaccount: None };
+    let (bal_nat,): (Nat,) = ic_cdk::call(p.token_ledger, "icrc1_balance_of", (self_acct,))
+        .await
+        .map_err(|e| format!("token balance: {e:?}"))?;
+    let bal: u128 = bal_nat.0.try_into().unwrap_or(0);
+    // Reserve TWO ledger fees: one for the icrc2_approve below, one for the pool's
+    // depositFrom transfer (which debits amount + fee from us). So we can deposit at
+    // most bal - 2*fee; depositing more was short by exactly the approve fee.
+    let two_fees = (token_fee as u128).saturating_mul(2);
+    let deposit_amount = bal.saturating_sub(two_fees);
+    if deposit_amount == 0 {
+        return Err(format!(
+            "insufficient token balance {bal} to cover 2 ledger fees ({token_fee} each)"
+        ));
+    }
+
     println!(
-        "trp_pay: swap start pool={} token={} amount={} zfo={}",
-        p.pool, p.token_ledger, p.token_amount, p.zero_for_one
+        "trp_pay: swap start pool={} token={} held={} deposit={} zfo={}",
+        p.pool, p.token_ledger, bal, deposit_amount, p.zero_for_one
     );
 
-    icrc2_approve_spender(p.token_ledger, p.pool, p.token_amount)
+    icrc2_approve_spender(p.token_ledger, p.pool, deposit_amount)
         .await
         .map_err(|e| format!("pool approve: {e}"))?;
 
-    if let Err(e) = pool_deposit_from(p.pool, p.token_ledger, p.token_amount, token_fee).await {
+    if let Err(e) = pool_deposit_from(p.pool, p.token_ledger, deposit_amount, token_fee).await {
         let _ = recover_unused_pool_balances(p.pool, p.token_ledger, p.icp_ledger).await;
         return Err(e);
     }
 
-    let quoted_out = pool_quote_out(p.pool, p.token_amount, p.zero_for_one)
+    let quoted_out = pool_quote_out(p.pool, deposit_amount, p.zero_for_one)
         .await
         .map_err(|e| format!("pre-swap quote: {e}"))?;
     let slip = p.slippage_bps.min(5000) as u128;
     let min_out = quoted_out.saturating_mul(10_000u128 - slip) / 10_000u128;
 
-    let icp_out = match pool_swap(p.pool, p.token_amount, p.zero_for_one, min_out).await {
+    let icp_out = match pool_swap(p.pool, deposit_amount, p.zero_for_one, min_out).await {
         Ok(v) => v,
         Err(e) => {
             let _ = recover_unused_pool_balances(p.pool, p.token_ledger, p.icp_ledger).await;

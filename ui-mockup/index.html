@@ -238,9 +238,9 @@ section{padding-block:72px; position:relative}
 .wallet-balances .k{display:block; font-size:10px; letter-spacing:.12em; text-transform:uppercase; color:var(--muted-2)}
 .wallet-balances code{word-break:break-all; color:var(--gold)}
 .wallet-token-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,140px),1fr));gap:10px;margin:12px 0}
-.wallet-token-cell{background:var(--panel);border:1px solid var(--line-soft);border-radius:12px;padding:10px 12px}
+.wallet-token-cell{background:var(--panel);border:1px solid var(--line-soft);border-radius:12px;padding:10px 12px;min-width:0;overflow:hidden}
 .wallet-token-cell .sym{font-family:var(--mono);font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--muted-2)}
-.wallet-token-cell .val{font-family:var(--display);font-size:18px;color:var(--gold);margin-top:4px;font-variant-numeric:tabular-nums}
+.wallet-token-cell .val{font-family:var(--display);font-size:18px;color:var(--gold);margin-top:4px;font-variant-numeric:tabular-nums;overflow-wrap:anywhere;line-height:1.2}
 .wallet-token-cell.soon .val{font-size:12px;color:var(--muted)}
 .wallet-row{display:flex; gap:10px; flex-wrap:wrap}
 .wallet-field input.seed{max-width:120px}
@@ -461,8 +461,8 @@ footer{border-top:1px solid var(--line-soft); padding-block:40px; margin-top:40p
 
 <section id="wallet">
   <div class="sec-head"><div class="eyebrow">Wallet</div>
-    <h2>Fund usage with ICP.</h2>
-    <p>Sign in with Internet Identity to see balances, send ICP, and deposit cycles into the TRP meter canister so diffusion jobs draw from your credits instead of draining shared beta quota.</p>
+    <h2>Fund usage with ICP and Chain-Key tokens.</h2>
+    <p>Sign in with Internet Identity to see balances, send tokens, and buy generation credits. Credit packs accept <strong>ICP, ckBTC, ckETH, and ckUSDC</strong> (priced live from on-chain ICPSwap quotes), or deposit cycles into the TRP meter canister so diffusion jobs draw from your credits instead of draining shared beta quota.</p>
   </div>
   <div class="panel"><div class="panel-b wallet-panel">
     <div class="wallet-row">
@@ -478,6 +478,15 @@ footer{border-top:1px solid var(--line-soft); padding-block:40px; margin-top:40p
     <div class="wallet-balances mono" style="margin-top:10px">
       <div><span class="k">Meter credits (legacy T-cycle meter)</span><span id="walletMeterCredits">—</span></div>
     </div>
+    <h4>Buy generation credits</h4>
+    <p class="muted" style="font-size:13px;margin:0 0 8px">Utility credits only — one credit = one on-chain Raven Diffusion image. Pay with ICP or enabled ICRC tokens (live ICPSwap quote on mainnet).</p>
+    <label class="field-label" for="walletBuyToken">Pay with</label>
+    <select id="walletBuyToken" class="wallet-select mono" aria-label="Payment token for credit packs"></select>
+    <div class="wallet-balances mono">
+      <div><span class="k">Paid credits</span><span id="walletPayCredits">—</span></div>
+    </div>
+    <div id="walletPackList" class="pack-list" aria-live="polite"></div>
+    <p class="mono muted" id="walletBuyStatus"></p>
     <h4>Send tokens</h4>
     <p class="muted" style="font-size:13px;margin:0 0 10px">ICRC-1 transfer to any principal (same address you use to receive).</p>
     <label class="field-label" for="walletSendToken">Token</label>
@@ -499,15 +508,6 @@ footer{border-top:1px solid var(--line-soft); padding-block:40px; margin-top:40p
       <button type="button" class="btn primary mini" id="walletDepositBtn">Deposit</button>
     </div>
     <p class="mono muted" id="walletDepositStatus"></p>
-    <h4>Buy generation credits</h4>
-    <p class="muted" style="font-size:13px;margin:0 0 8px">Utility credits only — one credit = one on-chain Raven Diffusion image. Pay with ICP or enabled ICRC tokens (live ICPSwap quote on mainnet).</p>
-    <label class="field-label" for="walletBuyToken">Pay with</label>
-    <select id="walletBuyToken" class="wallet-select mono" aria-label="Payment token for credit packs"></select>
-    <div class="wallet-balances mono">
-      <div><span class="k">Paid credits</span><span id="walletPayCredits">—</span></div>
-    </div>
-    <div id="walletPackList" class="pack-list" aria-live="polite"></div>
-    <p class="mono muted" id="walletBuyStatus"></p>
     <h4>Your NFTs</h4>
     <p class="muted" style="font-size:13px;margin:0 0 8px">ICRC-7 Raven Diffusion tokens tied to your Internet Identity.</p>
     <div id="walletNftGrid" class="nft-grid" aria-live="polite"></div>
