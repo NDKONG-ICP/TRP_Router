@@ -13,6 +13,9 @@ for (const f of [
   "chat-panel.js",
   "models-catalog.js",
   "wallet-page.js",
+  "generation-stats.js",
+  "ui-shell.js",
+  "admin-panel.js",
 ]) {
   cpSync(join(root, "ui-mockup", f), join(out, f));
 }
@@ -22,7 +25,7 @@ html = html.replace(
   `<meta name="trp-playground-build" content="${buildId}">\n<meta name="viewport"`,
 );
 html = html.replace(
-  /(<script src=")(config\.js|trp-core\.js|playground\.js|chat-panel\.js|models-catalog\.js|wallet-page\.js)("><\/script>)/g,
+  /(<script src=")(config\.js|trp-core\.js|ui-shell\.js|generation-stats\.js|playground\.js|chat-panel\.js|models-catalog\.js|wallet-page\.js|admin-panel\.js)("><\/script>)/g,
   `$1$2?v=${buildId}$3`,
 );
 writeFileSync(join(out, "index.html"), html);

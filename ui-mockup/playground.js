@@ -314,7 +314,7 @@
     return bytes;
   }
 
-  function nftIdl(IDL) {
+  function nftIdl({ IDL }) {
     const Account = IDL.Record({
       owner: IDL.Principal,
       subaccount: IDL.Opt(IDL.Vec(IDL.Nat8)),
@@ -349,16 +349,16 @@
       if (!identity) throw new Error("Internet Identity sign-in required to mint.");
       if (btn) btn.textContent = "Minting on-chain…";
       const agentMod = await import(
-        "https://cdn.jsdelivr.net/npm/@dfinity/agent@2.4.1/+esm"
+        "https://esm.sh/@dfinity/agent@2.4.1"
       );
       const candidMod = await import(
-        "https://cdn.jsdelivr.net/npm/@dfinity/candid@2.4.1/+esm"
+        "https://esm.sh/@dfinity/candid@2.4.1"
       );
       const agent = await agentMod.HttpAgent.create({
         identity,
         host: "https://icp-api.io",
       });
-      const actor = agentMod.Actor.createActor(nftIdl(candidMod.IDL), {
+      const actor = agentMod.Actor.createActor(nftIdl, {
         agent,
         canisterId: nftCanisterId,
       });
