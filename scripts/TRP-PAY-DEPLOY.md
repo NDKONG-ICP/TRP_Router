@@ -71,6 +71,43 @@ dfx canister call trp_pay set_config "(record { payments_enabled = opt true })" 
 
 Wallet tab: quote packs, paid credit balance, **Approve + Buy** via ICRC-2. User must hold ICP on the II ledger account first.
 
+## Phase A — alt-token packs (ICPSwap quote, no auto-swap)
+
+**Behavior:** Same credit packs as ICP; price in ckBTC / ckETH / ckUSDC / ckSOL via on-chain **SwapPool `quote`**. User pays with **ICRC-2**; `trp_pay` grants credits, then **forwards the received token to treasury** (owner II). No ICPSwap swap in this phase — you convert liquidity manually.
+
+**API (trp_pay):**
+
+- `list_payment_tokens` / admin `set_payment_token` / `remove_payment_token`
+- `quote_token(pack_index, symbol)` — composite query; includes ~0.5% buffer vs raw pool quote
+- `buy_credits_token(pack_index, symbol)` — re-prices at call time, then `icrc2_transfer_from` + treasury forward
+- `$TRP`: keep `enabled = false` until a ledger exists (`ledger` must not be anonymous when enabled)
+
+**Configure a token (mainnet example — ckBTC / ICP pool from ICPSwap docs):**
+
+```bash
+export DFX_IDENTITY=ic_deploy_plain
+PAY=ujwwi-hiaaa-aaaao-bbrha-cai
+dfx canister call trp_pay set_payment_token "(record {
+  symbol = \"ckBTC\";
+  ledger = principal \"mxzaz-hqaaa-aaaar-qaada-cai\";
+  decimals = 8 : nat8;
+  icpswap_pool = principal \"xmiu5-jqaaa-aaaag-qbz7q-cai\";
+  sell_zero_for_one = opt true;
+  enabled = true;
+  stub_token_base_per_icp_e8 = 0 : nat64;
+})" --network ic
+```
+
+Look up other pools via SwapFactory `4mmnk-kiaaa-aaaag-qbllq-cai` → `getPool` (fee **3000**, token `standard = "ICRC2"` or `"ICRC1"` per pool). Set `sell_zero_for_one` from pool metadata (token0→token1 = `true` when selling token0 for ICP).
+
+**Local replica:** set `icpswap_pool = principal \"aaaaa-aa\"` (anonymous) and non-zero `stub_token_base_per_icp_e8` for fixed-rate tests on `mock_trp_ledger`.
+
+**Deploy order:** `dfx deploy trp_pay` → `set_payment_token` for each asset → tiny mainnet buy per token → `CONFIRM_MAINNET=1 bash scripts/deploy-playground-only.sh` for wallet UI.
+
+## Phase B — auto-swap (NOT implemented yet)
+
+Planned: on `buy_credits_token`, swap token→ICP on ICPSwap (slippage bps), then existing CMC burn + treasury/LP split, idempotent failures + refund queue. Ship only after Phase A is stable and owner approves tiny mainnet swap tests (see `.cursor/rules/mainnet-icp-wallet-safety.mdc`).
+
 ## CMC smoke buy (CLI)
 
 From an identity with **≥ 1 ICP + fee** on the ledger (e.g. fund `ic_deploy_plain` / your II account):

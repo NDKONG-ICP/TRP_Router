@@ -38,10 +38,44 @@
   const nftStatus = document.getElementById("walletNftStatus");
   const payCreditsEl = document.getElementById("walletPayCredits");
   const packList = document.getElementById("walletPackList");
+  const buyTokenSelect = document.getElementById("walletBuyToken");
   const buyStatus = document.getElementById("walletBuyStatus");
+
+  /** @type {Array<{ symbol: string, ledger: string, decimals: number }>} */
+  let buyPaymentTokens = [{ symbol: "ICP", ledger: ICP_LEDGER, decimals: 8 }];
+  /** pack index -> token quote nat string */
+  let packTokenQuotes = {};
+
+  function ledgerBySymbol(sym) {
+    const w = WALLET_TOKENS.find(function (t) {
+      return t.symbol === sym || t.symbol.replace("$", "") === sym.replace("$", "");
+    });
+    if (w && w.id) return w.id;
+    const p = buyPaymentTokens.find(function (t) {
+      return t.symbol === sym;
+    });
+    return p ? p.ledger : ICP_LEDGER;
+  }
 
   function payIdlFactory({ IDL }) {
     const NatResult = IDL.Variant({ Ok: IDL.Nat64, Err: IDL.Text });
+    const TokenCfg = IDL.Record({
+      symbol: IDL.Text,
+      ledger: IDL.Principal,
+      decimals: IDL.Nat8,
+      icpswap_pool: IDL.Principal,
+      sell_zero_for_one: IDL.Opt(IDL.Bool),
+      enabled: IDL.Bool,
+      stub_token_base_per_icp_e8: IDL.Nat64,
+    });
+    const QuoteTokenResult = IDL.Variant({
+      Ok: IDL.Record({
+        token_amount: IDL.Nat,
+        icp_value_e8s: IDL.Nat64,
+        ts: IDL.Nat64,
+      }),
+      Err: IDL.Text,
+    });
     return IDL.Service({
       quote: IDL.Func(
         [],
@@ -56,8 +90,15 @@
         ],
         ["query"],
       ),
+      list_payment_tokens: IDL.Func([], [IDL.Vec(TokenCfg)], ["query"]),
+      quote_token: IDL.Func(
+        [IDL.Nat32, IDL.Text],
+        [QuoteTokenResult],
+        ["composite_query"],
+      ),
       credit_balance: IDL.Func([IDL.Principal], [IDL.Nat64], ["query"]),
       buy_credits: IDL.Func([IDL.Nat32], [NatResult], []),
+      buy_credits_token: IDL.Func([IDL.Nat32, IDL.Text], [NatResult], []),
     });
   }
 
@@ -448,6 +489,92 @@
     }
   }
 
+  function initBuyTokenSelect() {
+    if (!buyTokenSelect) return;
+    buyTokenSelect.innerHTML = "";
+    buyPaymentTokens.forEach(function (t) {
+      const opt = document.createElement("option");
+      opt.value = t.symbol;
+      opt.textContent = t.symbol;
+      buyTokenSelect.appendChild(opt);
+    });
+  }
+
+  async function fetchBuyPaymentTokens(pay) {
+    buyPaymentTokens = [{ symbol: "ICP", ledger: ICP_LEDGER, decimals: 8 }];
+    try {
+      const listed = await pay.list_payment_tokens();
+      listed.forEach(function (t) {
+        if (!t.enabled) return;
+        const sym = String(t.symbol);
+        if (sym.toUpperCase() === "ICP") return;
+        buyPaymentTokens.push({
+          symbol: sym,
+          ledger: t.ledger.toString(),
+          decimals: Number(t.decimals),
+        });
+      });
+    } catch (_) {
+      /* older trp_pay */
+    }
+    initBuyTokenSelect();
+  }
+
+  async function refreshPackQuotes(pay, packs) {
+    packTokenQuotes = {};
+    const sym = buyTokenSelect?.value || "ICP";
+    if (sym === "ICP") return;
+    for (const p of packs) {
+      try {
+        const q = await pay.quote_token(Number(p.index), sym);
+        if ("Ok" in q) {
+          packTokenQuotes[p.index] = q.Ok;
+        }
+      } catch (_) {
+        /* skip */
+      }
+    }
+  }
+
+  function packPriceLabel(p, sym) {
+    if (sym === "ICP") {
+      return (Number(p.icp_e8s) / 1e8).toFixed(2) + " ICP";
+    }
+    const q = packTokenQuotes[p.index];
+    if (!q) return "… " + sym;
+    const dec =
+      buyPaymentTokens.find(function (t) {
+        return t.symbol === sym;
+      })?.decimals ?? 8;
+    return formatTokenAmount(q.token_amount, dec) + " " + sym;
+  }
+
+  async function renderPackList(pay, packs) {
+    if (!packList) return;
+    await refreshPackQuotes(pay, packs);
+    const sym = buyTokenSelect?.value || "ICP";
+    packList.innerHTML = "";
+    packs.forEach(function (p) {
+      const row = document.createElement("div");
+      row.className = "pack-row";
+      row.innerHTML =
+        '<div class="meta"><strong>' +
+        p.credits +
+        " credits</strong> · " +
+        escapeHtml(packPriceLabel(p, sym)) +
+        "</div>";
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "btn primary mini";
+      btn.textContent = "Buy";
+      btn.addEventListener("click", function () {
+        buyPack(Number(p.index), p, sym);
+      });
+      row.appendChild(btn);
+      packList.appendChild(row);
+    });
+  }
+
   async function loadPacks() {
     if (!packList) return;
     const pid = payId();
@@ -458,74 +585,84 @@
     }
     try {
       const { HttpAgent, Actor } = await import(agentUrl);
-      const { IDL } = await import(candidUrl);
       const agent = await HttpAgent.create({ host: "https://icp-api.io" });
       const pay = Actor.createActor(payIdlFactory, { agent, canisterId: pid });
+      await fetchBuyPaymentTokens(pay);
       const packs = await pay.quote();
-      packList.innerHTML = "";
-      packs.forEach(function (p) {
-        const row = document.createElement("div");
-        row.className = "pack-row";
-        const icp = (Number(p.icp_e8s) / 1e8).toFixed(2);
-        row.innerHTML =
-          '<div class="meta"><strong>' +
-          p.credits +
-          " credits</strong> · " +
-          icp +
-          " ICP</div>";
-        const btn = document.createElement("button");
-        btn.type = "button";
-        btn.className = "btn primary mini";
-        btn.textContent = "Buy";
-        btn.addEventListener("click", function () {
-          buyPack(Number(p.index), p);
-        });
-        row.appendChild(btn);
-        packList.appendChild(row);
-      });
+      await renderPackList(pay, packs);
     } catch (e) {
       packList.innerHTML =
         '<p class="nft-empty err">' + escapeHtml(String(e.message || e)) + "</p>";
     }
   }
 
-  async function buyPack(packIndex, pack) {
+  async function buyPack(packIndex, pack, paySym) {
     const pid = payId();
     if (!pid) return;
+    const sym = paySym || buyTokenSelect?.value || "ICP";
     if (buyStatus) buyStatus.textContent = "Sign in with Internet Identity…";
     try {
       await window.TRP.ensureII();
       const { agent } = await agentWithII();
       const { Actor } = await import(agentUrl);
-      const { IDL } = await import(candidUrl);
       const { Principal } = await import(principalUrl);
+      const pay = Actor.createActor(payIdlFactory, { agent, canisterId: pid });
+      const ledgerId = ledgerBySymbol(sym);
       const ledger = Actor.createActor(ledgerIcrc2Idl, {
         agent,
-        canisterId: ICP_LEDGER,
+        canisterId: ledgerId,
       });
       const fee = BigInt(await ledger.icrc1_fee());
-      const approveAmt = BigInt(pack.icp_e8s) + fee;
-      if (buyStatus) buyStatus.textContent = "Approving ICP on ledger…";
-      const approveRes = await ledger.icrc2_approve({
-        from_subaccount: [],
-        spender: { owner: Principal.fromText(pid), subaccount: [] },
-        amount: approveAmt,
-        expires_at: [],
-        fee: [],
-        memo: [],
-        created_at_time: [],
-      });
-      if ("Err" in approveRes) {
-        throw new Error("Approve failed — check ICP balance on your II account.");
+
+      if (sym === "ICP") {
+        const approveAmt = BigInt(pack.icp_e8s) + fee;
+        if (buyStatus) buyStatus.textContent = "Approving ICP on ledger…";
+        const approveRes = await ledger.icrc2_approve({
+          from_subaccount: [],
+          spender: { owner: Principal.fromText(pid), subaccount: [] },
+          amount: approveAmt,
+          expires_at: [],
+          fee: [],
+          memo: [],
+          created_at_time: [],
+        });
+        if ("Err" in approveRes) {
+          throw new Error("Approve failed — check ICP balance on your II account.");
+        }
+        if (buyStatus) buyStatus.textContent = "Purchasing credits…";
+        const res = await pay.buy_credits(packIndex);
+        if ("Err" in res) throw new Error(res.Err);
+        if (buyStatus)
+          buyStatus.textContent = "Credits updated — balance " + res.Ok + ".";
+      } else {
+        if (buyStatus) buyStatus.textContent = "Fetching live " + sym + " price…";
+        const q = await pay.quote_token(packIndex, sym);
+        if ("Err" in q) throw new Error(q.Err);
+        const tokenAmt = BigInt(q.Ok.token_amount);
+        const approveAmt = tokenAmt + fee;
+        if (buyStatus) buyStatus.textContent = "Approving " + sym + "…";
+        const approveRes = await ledger.icrc2_approve({
+          from_subaccount: [],
+          spender: { owner: Principal.fromText(pid), subaccount: [] },
+          amount: approveAmt,
+          expires_at: [],
+          fee: [],
+          memo: [],
+          created_at_time: [],
+        });
+        if ("Err" in approveRes) {
+          throw new Error("Approve failed — check " + sym + " balance.");
+        }
+        if (buyStatus) buyStatus.textContent = "Purchasing credits…";
+        const res = await pay.buy_credits_token(packIndex, sym);
+        if ("Err" in res) throw new Error(res.Err);
+        if (buyStatus)
+          buyStatus.textContent =
+            "Credits updated — balance " + res.Ok + " (paid " + sym + ").";
       }
-      if (buyStatus) buyStatus.textContent = "Purchasing credits…";
-      const pay = Actor.createActor(payIdlFactory, { agent, canisterId: pid });
-      const res = await pay.buy_credits(packIndex);
-      if ("Err" in res) throw new Error(res.Err);
-      if (buyStatus)
-        buyStatus.textContent = "Credits updated — balance " + res.Ok + ".";
       await refreshPayCredits();
       await refreshBalances();
+      await loadPacks();
     } catch (e) {
       if (buyStatus) buyStatus.textContent = String(e.message || e);
     }
@@ -798,6 +935,9 @@
   document.getElementById("walletDepositBtn")?.addEventListener("click", depositMeter);
 
   initSendTokenSelect();
+  buyTokenSelect?.addEventListener("change", function () {
+    loadPacks();
+  });
 
   const meterLabel = document.getElementById("walletMeterId");
   if (meterLabel) meterLabel.textContent = meterId();

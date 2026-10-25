@@ -500,7 +500,9 @@ footer{border-top:1px solid var(--line-soft); padding-block:40px; margin-top:40p
     </div>
     <p class="mono muted" id="walletDepositStatus"></p>
     <h4>Buy generation credits</h4>
-    <p class="muted" style="font-size:13px;margin:0 0 8px">Pay with ICP from your II ledger account (fund via NNS or an exchange first). One credit = one on-chain Raven Diffusion image.</p>
+    <p class="muted" style="font-size:13px;margin:0 0 8px">Utility credits only — one credit = one on-chain Raven Diffusion image. Pay with ICP or enabled ICRC tokens (live ICPSwap quote on mainnet).</p>
+    <label class="field-label" for="walletBuyToken">Pay with</label>
+    <select id="walletBuyToken" class="wallet-select mono" aria-label="Payment token for credit packs"></select>
     <div class="wallet-balances mono">
       <div><span class="k">Paid credits</span><span id="walletPayCredits">—</span></div>
     </div>

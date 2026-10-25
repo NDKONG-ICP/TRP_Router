@@ -1,4 +1,4 @@
-// trp_pay — ICP (ICRC-2) payments -> Raven Diffusion generation credits.
+// trp_pay — ICP + alt-token (ICRC-2) payments -> Raven Diffusion generation credits.
 
 type Config = record {
   payments_enabled : bool;
@@ -21,23 +21,45 @@ type ConfigUpdate = record {
   cycles_slice_e8s : opt nat64;
 };
 
+type TokenCfg = record {
+  symbol : text;
+  ledger : principal;
+  decimals : nat8;
+  icpswap_pool : principal;
+  sell_zero_for_one : opt bool;
+  enabled : bool;
+  stub_token_base_per_icp_e8 : nat64;
+};
+
 type Pack = record { index : nat32; icp_e8s : nat64; credits : nat64 };
+
+type TokenQuote = record {
+  token_amount : nat;
+  icp_value_e8s : nat64;
+  ts : nat64;
+};
 
 type UnitResult = variant { Ok; Err : text };
 type NatResult = variant { Ok : nat64; Err : text };
+type QuoteTokenResult = variant { Ok : TokenQuote; Err : text };
 
 service : {
   // public
   quote : () -> (vec Pack) query;
+  quote_token : (nat32, text) -> (QuoteTokenResult) composite_query;
   credit_balance : (principal) -> (nat64) query;
   get_config : () -> (Config) query;
+  list_payment_tokens : () -> (vec TokenCfg) query;
   buy_credits : (nat32) -> (NatResult);
+  buy_credits_token : (nat32, text) -> (NatResult);
 
   // router / admin
   consume_credit : (principal) -> (NatResult);
 
   // admin
   set_config : (ConfigUpdate) -> (UnitResult);
+  set_payment_token : (TokenCfg) -> (UnitResult);
+  remove_payment_token : (text) -> (UnitResult);
   add_admin : (principal) -> (UnitResult);
   admin_grant_credits : (principal, nat64) -> (NatResult);
   sweep_to_treasury : () -> (NatResult);

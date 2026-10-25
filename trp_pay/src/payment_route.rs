@@ -150,6 +150,37 @@ pub async fn route_treasury(
         .map(|_| ())
 }
 
+/// Forward non-ICP tokens to treasury (Phase A — no auto-swap).
+pub async fn route_treasury_token(
+    ledger: Principal,
+    treasury: Principal,
+    amount: u128,
+    fee: u64,
+) -> Result<(), String> {
+    if amount == 0 {
+        return Err("zero transfer amount".to_string());
+    }
+    let to = Account {
+        owner: treasury,
+        subaccount: None,
+    };
+    let args = TransferArg {
+        from_subaccount: None,
+        to,
+        amount: Nat::from(amount),
+        fee: Some(Nat::from(fee)),
+        memo: None,
+        created_at_time: None,
+    };
+    let (res,): (TransferResult,) = ic_cdk::call(ledger, "icrc1_transfer", (args,))
+        .await
+        .map_err(|e| format!("icrc1_transfer call failed: {e:?}"))?;
+    match res {
+        TransferResult::Ok(_) => Ok(()),
+        TransferResult::Err(e) => Err(format!("icrc1_transfer rejected: {e:?}")),
+    }
+}
+
 /// Best-effort split after credits are granted. Logs failures; does not roll back credits.
 pub async fn split_purchase_icp(
     ledger: Principal,

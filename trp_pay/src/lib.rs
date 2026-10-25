@@ -12,7 +12,9 @@
 //! nothing moves real ICP until an admin configures and enables it. Test on
 //! the mock ledger first.
 
+mod icpswap_quote;
 mod payment_route;
+mod token_payments;
 
 use candid::{CandidType, Deserialize, Nat, Principal};
 use ic_stable_structures::memory_manager::{MemoryId, MemoryManager, VirtualMemory};
@@ -70,6 +72,20 @@ enum TransferFromResult {
 }
 
 // ── config + storage ──
+/// Admin-configured alt-token payment (Phase A).
+#[derive(CandidType, Deserialize, Clone, Debug)]
+pub struct TokenCfg {
+    pub symbol: String,
+    pub ledger: Principal,
+    pub decimals: u8,
+    pub icpswap_pool: Principal,
+    /// If null, inferred from pool metadata at quote/buy time.
+    pub sell_zero_for_one: Option<bool>,
+    pub enabled: bool,
+    /// Test/local only when `icpswap_pool` is anonymous.
+    pub stub_token_base_per_icp_e8: u64,
+}
+
 #[derive(CandidType, Deserialize, Clone)]
 struct Config {
     payments_enabled: bool,
@@ -153,6 +169,66 @@ thread_local! {
         )
         .expect("init purchase id"),
     );
+    static PAYMENT_TOKENS: RefCell<StableBTreeMap<SymbolKey, TokenCfg, Memory>> =
+        RefCell::new(StableBTreeMap::init(
+            MM.with(|m| m.borrow().get(MemoryId::new(4))),
+        ));
+}
+
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord)]
+struct SymbolKey(String);
+impl Storable for SymbolKey {
+    fn to_bytes(&self) -> Cow<[u8]> {
+        Cow::Owned(self.0.as_bytes().to_vec())
+    }
+    fn from_bytes(bytes: Cow<[u8]>) -> Self {
+        SymbolKey(String::from_utf8(bytes.into_owned()).unwrap_or_default())
+    }
+    const BOUND: Bound = Bound::Unbounded;
+}
+impl Storable for TokenCfg {
+    fn to_bytes(&self) -> Cow<[u8]> {
+        Cow::Owned(candid::encode_one(self).expect("encode TokenCfg"))
+    }
+    fn from_bytes(bytes: Cow<[u8]>) -> Self {
+        candid::decode_one(&bytes).expect("decode TokenCfg")
+    }
+    const BOUND: Bound = Bound::Unbounded;
+}
+
+fn norm_symbol(s: &str) -> String {
+    s.trim().to_uppercase()
+}
+
+fn payment_tokens_vec() -> Vec<TokenCfg> {
+    PAYMENT_TOKENS.with(|m| m.borrow().iter().map(|(_, v)| v.clone()).collect())
+}
+
+fn get_payment_token(symbol: &str) -> Option<TokenCfg> {
+    PAYMENT_TOKENS.with(|m| m.borrow().get(&SymbolKey(norm_symbol(symbol))))
+}
+
+fn set_payment_token_cfg(cfg: TokenCfg) -> Result<(), String> {
+    if cfg.symbol.trim().is_empty() {
+        return Err("symbol required".to_string());
+    }
+    let sym = norm_symbol(&cfg.symbol);
+    if cfg.enabled && (sym == "TRP" || sym == "$TRP") && cfg.ledger == Principal::anonymous() {
+        return Err("$TRP ledger not configured".to_string());
+    }
+    PAYMENT_TOKENS.with(|m| {
+        m.borrow_mut()
+            .insert(SymbolKey(norm_symbol(&cfg.symbol)), cfg);
+    });
+    Ok(())
+}
+
+fn remove_payment_token_cfg(symbol: &str) -> Result<(), String> {
+    PAYMENT_TOKENS.with(|m| {
+        m.borrow_mut()
+            .remove(&SymbolKey(norm_symbol(symbol)));
+    });
+    Ok(())
 }
 
 #[derive(Clone, Copy, Default)]
@@ -309,6 +385,23 @@ fn get_config() -> Config {
     config()
 }
 
+#[ic_cdk_macros::query]
+fn list_payment_tokens() -> Vec<TokenCfg> {
+    payment_tokens_vec()
+}
+
+#[ic_cdk_macros::update]
+fn set_payment_token(token: TokenCfg) -> Result<(), String> {
+    require_admin()?;
+    set_payment_token_cfg(token)
+}
+
+#[ic_cdk_macros::update]
+fn remove_payment_token(symbol: String) -> Result<(), String> {
+    require_admin()?;
+    remove_payment_token_cfg(&symbol)
+}
+
 // ── public ──
 #[derive(CandidType)]
 struct Pack {
@@ -391,6 +484,108 @@ async fn buy_credits_inner(pack_index: u32) -> Result<u64, String> {
         cfg.cycles_slice_e8s,
     )
     .await;
+
+    Ok(new_bal)
+}
+
+#[derive(CandidType, Deserialize)]
+struct TokenQuote {
+    token_amount: Nat,
+    icp_value_e8s: u64,
+    ts: u64,
+}
+
+#[derive(CandidType, Deserialize)]
+enum QuoteTokenResult {
+    Ok(TokenQuote),
+    Err(String),
+}
+
+#[ic_cdk_macros::query(composite = true)]
+async fn quote_token(pack_index: u32, symbol: String) -> QuoteTokenResult {
+    match quote_token_inner(pack_index, &symbol).await {
+        Ok(q) => QuoteTokenResult::Ok(q),
+        Err(e) => QuoteTokenResult::Err(e),
+    }
+}
+
+async fn quote_token_inner(pack_index: u32, symbol: &str) -> Result<TokenQuote, String> {
+    if norm_symbol(symbol) == "ICP" {
+        return Err("use quote() for ICP packs".to_string());
+    }
+    let tok = get_payment_token(symbol).ok_or_else(|| "unknown payment token".to_string())?;
+    if !tok.enabled {
+        return Err("token not enabled for payments".to_string());
+    }
+    let (icp_e8s, _credits) = *PACKS
+        .get(pack_index as usize)
+        .ok_or_else(|| "invalid pack index".to_string())?;
+    let amount = token_payments::compute_token_price(&token_payments::TokenCfg {
+        symbol: tok.symbol.clone(),
+        ledger: tok.ledger,
+        decimals: tok.decimals,
+        icpswap_pool: tok.icpswap_pool,
+        sell_zero_for_one: tok.sell_zero_for_one,
+        enabled: tok.enabled,
+        stub_token_base_per_icp_e8: tok.stub_token_base_per_icp_e8,
+    }, icp_e8s)
+    .await?;
+    Ok(TokenQuote {
+        token_amount: Nat::from(amount),
+        icp_value_e8s: icp_e8s,
+        ts: ic_cdk::api::time(),
+    })
+}
+
+#[ic_cdk_macros::update]
+async fn buy_credits_token(pack_index: u32, symbol: String) -> NatResult {
+    match buy_credits_token_inner(pack_index, &symbol).await {
+        Ok(b) => NatResult::Ok(b),
+        Err(e) => NatResult::Err(e),
+    }
+}
+
+async fn buy_credits_token_inner(pack_index: u32, symbol: &str) -> Result<u64, String> {
+    let cfg = config();
+    if !cfg.payments_enabled {
+        return Err("payments are not enabled yet".to_string());
+    }
+    let caller = ic_cdk::caller();
+    if caller == Principal::anonymous() {
+        return Err("sign in with Internet Identity first".to_string());
+    }
+    if norm_symbol(symbol) == "ICP" {
+        return Err("use buy_credits for ICP".to_string());
+    }
+    let tok = get_payment_token(symbol).ok_or_else(|| "unknown payment token".to_string())?;
+    if !tok.enabled {
+        return Err("token not enabled for payments".to_string());
+    }
+    let (icp_e8s, credits) = *PACKS
+        .get(pack_index as usize)
+        .ok_or_else(|| "invalid pack index".to_string())?;
+
+    let tp = token_payments::TokenCfg {
+        symbol: tok.symbol.clone(),
+        ledger: tok.ledger,
+        decimals: tok.decimals,
+        icpswap_pool: tok.icpswap_pool,
+        sell_zero_for_one: tok.sell_zero_for_one,
+        enabled: tok.enabled,
+        stub_token_base_per_icp_e8: tok.stub_token_base_per_icp_e8,
+    };
+    let token_amount = token_payments::compute_token_price(&tp, icp_e8s).await?;
+
+    token_payments::pull_token_from_user(tok.ledger, caller, token_amount).await?;
+
+    let new_bal = credit_of(&caller) + credits;
+    set_credit(&caller, new_bal);
+    log_purchase(caller, pack_index, icp_e8s, credits);
+
+    if let Err(e) = token_payments::forward_token_to_treasury(&cfg, tok.ledger, token_amount).await
+    {
+        ic_cdk::println!("trp_pay: token forward failed: {e}");
+    }
 
     Ok(new_bal)
 }
