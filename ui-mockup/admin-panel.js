@@ -118,6 +118,19 @@
           ],
           ["query"],
         ),
+        get_convert_config: I.Func(
+          [],
+          [
+            I.Record({
+              auto_convert_enabled: I.Bool,
+              slippage_bps: I.Nat32,
+              liquidity_share_bps: I.Nat32,
+              liquidity_add_enabled: I.Bool,
+              trp_liquidity_pool: I.Principal,
+            }),
+          ],
+          ["query"],
+        ),
         set_config: I.Func(
           [
             I.Record({
@@ -128,11 +141,46 @@
               cmc: I.Opt(I.Principal),
               router: I.Opt(I.Principal),
               cycles_slice_e8s: I.Opt(I.Nat64),
+              auto_convert_enabled: I.Opt(I.Bool),
+              slippage_bps: I.Opt(I.Nat32),
+              liquidity_share_bps: I.Opt(I.Nat32),
+              liquidity_add_enabled: I.Opt(I.Bool),
+              trp_liquidity_pool: I.Opt(I.Principal),
             }),
           ],
           [OkErr(I.Null)],
           [],
         ),
+        admin_list_pending: I.Func(
+          [I.Nat32],
+          [
+            OkErr(
+              I.Vec(
+                I.Record({
+                  id: I.Nat64,
+                  user: I.Principal,
+                  token_ledger: I.Principal,
+                  pool: I.Principal,
+                  token_amount: I.Nat,
+                  pack_index: I.Nat32,
+                  icp_e8s: I.Nat64,
+                  credits: I.Nat64,
+                  status: I.Variant({
+                    Pending: I.Null,
+                    Converted: I.Null,
+                    Refunded: I.Null,
+                    Failed: I.Null,
+                  }),
+                  last_error: I.Text,
+                  at_ns: I.Nat64,
+                }),
+              ),
+            ),
+          ],
+          ["query"],
+        ),
+        admin_retry_conversion: I.Func([I.Nat64], [OkErr(I.Null)], []),
+        admin_refund_pending: I.Func([I.Nat64], [OkErr(I.Null)], []),
         admin_treasury_view: I.Func(
           [],
           [
@@ -239,10 +287,16 @@
   async function refreshPayments() {
     try {
       const { actor } = await adminPayActor();
-      const [viewRes, balRes, purRes] = await Promise.all([
+      const [viewRes, balRes, purRes, convCfg, pendRes] = await Promise.all([
         actor.admin_treasury_view(),
         actor.admin_list_credit_balances(100),
         actor.admin_list_recent_purchases(50),
+        actor.get_convert_config().catch(function () {
+          return null;
+        }),
+        actor.admin_list_pending(20).catch(function () {
+          return { Err: "unsupported" };
+        }),
       ]);
       if ("Err" in viewRes) throw new Error(viewRes.Err);
       const v = viewRes.Ok;
@@ -271,7 +325,93 @@
       }
       if ("Ok" in balRes) renderCreditList(balRes.Ok);
       if ("Ok" in purRes) renderPurchaseList(purRes.Ok);
+      if (convCfg) {
+        const ac = document.getElementById("adminAutoConvertToggle");
+        if (ac) {
+          ac.textContent = convCfg.auto_convert_enabled ? "ON" : "OFF";
+          ac.setAttribute(
+            "aria-pressed",
+            convCfg.auto_convert_enabled ? "true" : "false",
+          );
+        }
+        setText(
+          "adminConvertMeta",
+          "slippage " +
+            convCfg.slippage_bps +
+            " bps · LP share " +
+            convCfg.liquidity_share_bps +
+            " bps",
+        );
+      }
+      if ("Ok" in pendRes) renderPendingList(pendRes.Ok, actor);
       setPayStatus("");
+    } catch (e) {
+      setPayStatus(String(e.message || e));
+    }
+  }
+
+  function pendingStatusLabel(st) {
+    if ("Pending" in st) return "pending";
+    if ("Converted" in st) return "converted";
+    if ("Refunded" in st) return "refunded";
+    if ("Failed" in st) return "failed";
+    return "?";
+  }
+
+  function renderPendingList(rows, actor) {
+    const el = document.getElementById("adminPendingList");
+    if (!el) return;
+    if (!rows.length) {
+      el.innerHTML = '<p class="muted">No pending conversions.</p>';
+      return;
+    }
+    el.innerHTML = "";
+    rows.forEach(function (r) {
+      const row = document.createElement("div");
+      row.className = "admin-table-row";
+      row.textContent =
+        "#" +
+        r.id +
+        " " +
+        pendingStatusLabel(r.status) +
+        " · user " +
+        r.user.toText().slice(0, 12) +
+        "… · amt " +
+        r.token_amount.toString();
+      if (pendingStatusLabel(r.status) === "failed") {
+        const retry = document.createElement("button");
+        retry.type = "button";
+        retry.className = "btn ghost mini";
+        retry.textContent = "Retry";
+        retry.style.marginLeft = "8px";
+        retry.addEventListener("click", async function () {
+          setPayStatus("Retrying #" + r.id + "…");
+          try {
+            const res = await actor.admin_retry_conversion(r.id);
+            if ("Err" in res) throw new Error(res.Err);
+            setPayStatus("Retry submitted for #" + r.id);
+            await refreshPayments();
+          } catch (e) {
+            setPayStatus(String(e.message || e));
+          }
+        });
+        row.appendChild(retry);
+      }
+      el.appendChild(row);
+    });
+  }
+
+  async function toggleAutoConvert() {
+    try {
+      const { actor } = await adminPayActor();
+      const cfgNow = await actor.get_convert_config();
+      const next = !cfgNow.auto_convert_enabled;
+      const res = await actor.set_config({ auto_convert_enabled: [next] });
+      if ("Err" in res) throw new Error(res.Err);
+      setPayStatus(
+        next ? "Auto-convert enabled — test tiny amounts first." : "Auto-convert off (Phase A forward).",
+      );
+      await refreshPayments();
     } catch (e) {
       setPayStatus(String(e.message || e));
     }
@@ -561,6 +701,7 @@
   document.getElementById("adminSignIn")?.addEventListener("click", checkAccess);
   document.getElementById("adminRefresh")?.addEventListener("click", refreshMetrics);
   document.getElementById("adminPaymentsToggle")?.addEventListener("click", togglePayments);
+  document.getElementById("adminAutoConvertToggle")?.addEventListener("click", toggleAutoConvert);
   document.getElementById("adminRefreshPay")?.addEventListener("click", refreshPayments);
   document.getElementById("adminSweepTreasury")?.addEventListener("click", async function () {
     try {

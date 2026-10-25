@@ -191,6 +191,42 @@ pub async fn split_purchase_icp(
     credits: u64,
     cycles_slice_e8s: u64,
 ) {
+    split_purchase_icp_with_lp(
+        ledger,
+        cmc,
+        treasury,
+        diffusion,
+        icp_e8s,
+        credits,
+        cycles_slice_e8s,
+        0,
+        false,
+        Principal::anonymous(),
+    )
+    .await;
+}
+
+/// Route received ICP after a swap. Optional LP share is reserved for Phase B+ ($TRP pools).
+pub async fn split_purchase_icp_with_lp(
+    ledger: Principal,
+    cmc: Principal,
+    treasury: Principal,
+    diffusion: Principal,
+    icp_e8s: u64,
+    credits: u64,
+    cycles_slice_e8s: u64,
+    liquidity_share_bps: u32,
+    liquidity_add_enabled: bool,
+    trp_liquidity_pool: Principal,
+) {
+    if liquidity_add_enabled
+        && liquidity_share_bps > 0
+        && trp_liquidity_pool != Principal::anonymous()
+    {
+        println!(
+            "trp_pay: liquidity_add_enabled but increaseLiquidity not wired — sending all residual to treasury"
+        );
+    }
     let burn_target = cycles_slice_e8s.saturating_mul(credits);
     let max_burn = icp_e8s.saturating_sub(LEDGER_FEE_E8S.saturating_mul(2));
     let burn_e8s = burn_target.min(max_burn);

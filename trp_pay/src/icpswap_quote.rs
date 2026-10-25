@@ -27,17 +27,17 @@ enum QuoteResult {
     err(PoolError),
 }
 
-#[derive(CandidType, Deserialize, Debug)]
-struct PoolMetadata {
-    token0: TokenInfo,
-    token1: TokenInfo,
-    fee: Nat,
+#[derive(CandidType, Deserialize, Debug, Clone)]
+pub struct PoolMetadata {
+    pub token0: TokenInfo,
+    pub token1: TokenInfo,
+    pub fee: Nat,
 }
 
-#[derive(CandidType, Deserialize, Debug)]
-struct TokenInfo {
-    address: String,
-    standard: String,
+#[derive(CandidType, Deserialize, Debug, Clone)]
+pub struct TokenInfo {
+    pub address: String,
+    pub standard: String,
 }
 
 #[derive(CandidType, Deserialize, Debug)]
@@ -48,13 +48,7 @@ enum MetaResult {
 
 /// Infer `zeroForOne` when selling `token_ledger` for ICP on this pool.
 pub async fn sell_zero_for_one(pool: Principal, token_ledger: Principal) -> Result<bool, String> {
-    let (res,): (MetaResult,) = ic_cdk::call(pool, "metadata", ())
-        .await
-        .map_err(|e| format!("pool metadata: {e:?}"))?;
-    let meta = match res {
-        MetaResult::ok(m) => m,
-        MetaResult::err(e) => return Err(format!("pool metadata err: {e:?}")),
-    };
+    let meta = pool_metadata(pool).await?;
     let token = token_ledger.to_text();
     let icp = ICP_LEDGER;
     if meta.token0.address == token && meta.token1.address == icp {
@@ -69,7 +63,17 @@ pub async fn sell_zero_for_one(pool: Principal, token_ledger: Principal) -> Resu
     }
 }
 
-async fn pool_quote(
+pub async fn pool_metadata(pool: Principal) -> Result<PoolMetadata, String> {
+    let (res,): (MetaResult,) = ic_cdk::call(pool, "metadata", ())
+        .await
+        .map_err(|e| format!("pool metadata: {e:?}"))?;
+    match res {
+        MetaResult::ok(m) => Ok(m),
+        MetaResult::err(e) => Err(format!("pool metadata err: {e:?}")),
+    }
+}
+
+pub async fn pool_quote(
     pool: Principal,
     amount_in: u128,
     zero_for_one: bool,

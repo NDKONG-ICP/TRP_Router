@@ -560,6 +560,12 @@ footer{border-top:1px solid var(--line-soft); padding-block:40px; margin-top:40p
             <span>ICP purchases enabled</span>
             <button type="button" class="btn ghost mini" id="adminPaymentsToggle" aria-pressed="false">—</button>
           </div>
+          <div class="admin-pay-row">
+            <span>Auto-convert alt tokens → ICP (Phase B)</span>
+            <button type="button" class="btn ghost mini" id="adminAutoConvertToggle" aria-pressed="false">—</button>
+          </div>
+          <p class="mono muted" id="adminConvertMeta" style="font-size:11px;margin:4px 0 0"></p>
+          <div id="adminPendingList" class="admin-table mono" style="margin-top:10px;font-size:11px"></div>
           <div class="admin-tiles" style="margin-top:12px">
             <div class="admin-tile"><div class="n" id="adminPayCanisterIcp">—</div><div class="l">ICP on trp_pay (refundable)</div></div>
             <div class="admin-tile"><div class="n" id="adminCyclesSlice">—</div><div class="l">Burn slice e8s / credit</div></div>

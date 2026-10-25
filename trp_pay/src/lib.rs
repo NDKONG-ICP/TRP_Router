@@ -12,6 +12,8 @@
 //! nothing moves real ICP until an admin configures and enables it. Test on
 //! the mock ledger first.
 
+mod auto_settle;
+mod icpswap_convert;
 mod icpswap_quote;
 mod payment_route;
 mod token_payments;
@@ -173,6 +175,78 @@ thread_local! {
         RefCell::new(StableBTreeMap::init(
             MM.with(|m| m.borrow().get(MemoryId::new(4))),
         ));
+    static PENDING: RefCell<StableBTreeMap<u64, auto_settle::PendingConversion, Memory>> =
+        RefCell::new(StableBTreeMap::init(
+            MM.with(|m| m.borrow().get(MemoryId::new(5))),
+        ));
+    static NEXT_PENDING_ID: RefCell<StableCell<PurchaseId, Memory>> = RefCell::new(
+        StableCell::init(
+            MM.with(|m| m.borrow().get(MemoryId::new(6))),
+            PurchaseId(0),
+        )
+        .expect("init pending id"),
+    );
+    static CONVERT_CFG: RefCell<StableCell<ConvertConfig, Memory>> = RefCell::new(
+        StableCell::init(
+            MM.with(|m| m.borrow().get(MemoryId::new(7))),
+            ConvertConfig::default(),
+        )
+        .expect("init convert config"),
+    );
+}
+
+#[derive(CandidType, Deserialize, Clone)]
+struct ConvertConfig {
+    auto_convert_enabled: bool,
+    slippage_bps: u32,
+    liquidity_share_bps: u32,
+    liquidity_add_enabled: bool,
+    trp_liquidity_pool: Principal,
+}
+impl Default for ConvertConfig {
+    fn default() -> Self {
+        ConvertConfig {
+            auto_convert_enabled: false,
+            slippage_bps: 100,
+            liquidity_share_bps: 0,
+            liquidity_add_enabled: false,
+            trp_liquidity_pool: Principal::anonymous(),
+        }
+    }
+}
+impl Storable for ConvertConfig {
+    fn to_bytes(&self) -> Cow<[u8]> {
+        Cow::Owned(candid::encode_one(self).expect("encode ConvertConfig"))
+    }
+    fn from_bytes(bytes: Cow<[u8]>) -> Self {
+        candid::decode_one(&bytes).expect("decode ConvertConfig")
+    }
+    const BOUND: Bound = Bound::Unbounded;
+}
+
+impl Storable for auto_settle::PendingConversion {
+    fn to_bytes(&self) -> Cow<[u8]> {
+        Cow::Owned(candid::encode_one(self).expect("encode PendingConversion"))
+    }
+    fn from_bytes(bytes: Cow<[u8]>) -> Self {
+        candid::decode_one(&bytes).expect("decode PendingConversion")
+    }
+    const BOUND: Bound = Bound::Unbounded;
+}
+
+fn convert_config() -> ConvertConfig {
+    CONVERT_CFG.with(|c| c.borrow().get().clone())
+}
+
+fn insert_pending(mut p: auto_settle::PendingConversion) -> u64 {
+    let id = NEXT_PENDING_ID.with(|n| {
+        let cur = n.borrow().get().0;
+        let _ = n.borrow_mut().set(PurchaseId(cur.saturating_add(1)));
+        cur
+    });
+    p.id = id;
+    PENDING.with(|m| m.borrow_mut().insert(id, p));
+    id
 }
 
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord)]
@@ -333,6 +407,11 @@ struct ConfigUpdate {
     cmc: Option<Principal>,
     router: Option<Principal>,
     cycles_slice_e8s: Option<u64>,
+    auto_convert_enabled: Option<bool>,
+    slippage_bps: Option<u32>,
+    liquidity_share_bps: Option<u32>,
+    liquidity_add_enabled: Option<bool>,
+    trp_liquidity_pool: Option<Principal>,
 }
 #[ic_cdk_macros::update]
 fn set_config(u: ConfigUpdate) -> Result<(), String> {
@@ -345,6 +424,15 @@ fn set_config(u: ConfigUpdate) -> Result<(), String> {
         if let Some(v) = u.cmc { c.cmc = v; }
         if let Some(v) = u.router { c.router = v; }
         if let Some(v) = u.cycles_slice_e8s { c.cycles_slice_e8s = v; }
+    });
+    CONVERT_CFG.with(|cell| {
+        let mut cc = cell.borrow().get().clone();
+        if let Some(v) = u.auto_convert_enabled { cc.auto_convert_enabled = v; }
+        if let Some(v) = u.slippage_bps { cc.slippage_bps = v; }
+        if let Some(v) = u.liquidity_share_bps { cc.liquidity_share_bps = v; }
+        if let Some(v) = u.liquidity_add_enabled { cc.liquidity_add_enabled = v; }
+        if let Some(v) = u.trp_liquidity_pool { cc.trp_liquidity_pool = v; }
+        cell.borrow_mut().set(cc).expect("set convert config");
     });
     Ok(())
 }
@@ -383,6 +471,27 @@ fn add_admin(p: Principal) -> Result<(), String> {
 #[ic_cdk_macros::query]
 fn get_config() -> Config {
     config()
+}
+
+#[derive(CandidType)]
+struct ConvertConfigView {
+    auto_convert_enabled: bool,
+    slippage_bps: u32,
+    liquidity_share_bps: u32,
+    liquidity_add_enabled: bool,
+    trp_liquidity_pool: Principal,
+}
+
+#[ic_cdk_macros::query]
+fn get_convert_config() -> ConvertConfigView {
+    let c = convert_config();
+    ConvertConfigView {
+        auto_convert_enabled: c.auto_convert_enabled,
+        slippage_bps: c.slippage_bps,
+        liquidity_share_bps: c.liquidity_share_bps,
+        liquidity_add_enabled: c.liquidity_add_enabled,
+        trp_liquidity_pool: c.trp_liquidity_pool,
+    }
 }
 
 #[ic_cdk_macros::query]
@@ -582,12 +691,121 @@ async fn buy_credits_token_inner(pack_index: u32, symbol: &str) -> Result<u64, S
     set_credit(&caller, new_bal);
     log_purchase(caller, pack_index, icp_e8s, credits);
 
-    if let Err(e) = token_payments::forward_token_to_treasury(&cfg, tok.ledger, token_amount).await
-    {
-        ic_cdk::println!("trp_pay: token forward failed: {e}");
-    }
+    let cc = convert_config();
+    let tp2 = token_payments::TokenCfg {
+        symbol: tok.symbol.clone(),
+        ledger: tok.ledger,
+        decimals: tok.decimals,
+        icpswap_pool: tok.icpswap_pool,
+        sell_zero_for_one: tok.sell_zero_for_one,
+        enabled: tok.enabled,
+        stub_token_base_per_icp_e8: tok.stub_token_base_per_icp_e8,
+    };
+    auto_settle::settle_after_token_pull(
+        &cfg,
+        &auto_settle::ConvertConfig {
+            auto_convert_enabled: cc.auto_convert_enabled,
+            slippage_bps: cc.slippage_bps,
+            liquidity_share_bps: cc.liquidity_share_bps,
+            liquidity_add_enabled: cc.liquidity_add_enabled,
+            trp_liquidity_pool: cc.trp_liquidity_pool,
+        },
+        &tp2,
+        caller,
+        token_amount,
+        pack_index,
+        icp_e8s,
+        credits,
+        |p| {
+            insert_pending(p);
+        },
+    )
+    .await;
 
     Ok(new_bal)
+}
+
+#[ic_cdk_macros::query]
+fn admin_list_pending(limit: u32) -> Result<Vec<auto_settle::PendingConversion>, String> {
+    require_admin_query()?;
+    let cap = limit.max(1).min(200) as usize;
+    let mut rows: Vec<_> = PENDING.with(|m| m.borrow().iter().map(|(_, v)| v.clone()).collect());
+    rows.sort_by_key(|p| std::cmp::Reverse(p.id));
+    rows.truncate(cap);
+    Ok(rows)
+}
+
+#[ic_cdk_macros::update]
+async fn admin_retry_conversion(pending_id: u64) -> Result<(), String> {
+    require_admin()?;
+    let pending = PENDING.with(|m| {
+        m.borrow()
+            .get(&pending_id)
+            .ok_or_else(|| "pending id not found".to_string())
+    })?;
+    let sym = PAYMENT_TOKENS.with(|m| {
+        m.borrow()
+            .iter()
+            .find(|(_, t)| t.ledger == pending.token_ledger)
+            .map(|(_, t)| t.symbol.clone())
+            .ok_or_else(|| "token not in payment_tokens".to_string())
+    })?;
+    let tok = get_payment_token(&sym).ok_or_else(|| "token config missing".to_string())?;
+    let cfg = config();
+    let cc = convert_config();
+    let tp = token_payments::TokenCfg {
+        symbol: tok.symbol.clone(),
+        ledger: tok.ledger,
+        decimals: tok.decimals,
+        icpswap_pool: tok.icpswap_pool,
+        sell_zero_for_one: tok.sell_zero_for_one,
+        enabled: tok.enabled,
+        stub_token_base_per_icp_e8: tok.stub_token_base_per_icp_e8,
+    };
+    auto_settle::retry_pending_conversion(
+        &cfg,
+        &auto_settle::ConvertConfig {
+            auto_convert_enabled: cc.auto_convert_enabled,
+            slippage_bps: cc.slippage_bps,
+            liquidity_share_bps: cc.liquidity_share_bps,
+            liquidity_add_enabled: cc.liquidity_add_enabled,
+            trp_liquidity_pool: cc.trp_liquidity_pool,
+        },
+        &pending,
+        &tp,
+    )
+    .await?;
+    PENDING.with(|m| {
+        let mut p = pending;
+        p.status = auto_settle::PendingStatus::Converted;
+        p.last_error = String::new();
+        m.borrow_mut().insert(pending_id, p);
+    });
+    Ok(())
+}
+
+#[ic_cdk_macros::update]
+async fn admin_refund_pending(pending_id: u64) -> Result<(), String> {
+    require_admin()?;
+    let pending = PENDING.with(|m| {
+        m.borrow()
+            .get(&pending_id)
+            .ok_or_else(|| "pending id not found".to_string())
+    })?;
+    let cfg = config();
+    auto_settle::refund_token_to_user(
+        &cfg,
+        pending.token_ledger,
+        pending.user,
+        pending.token_amount,
+    )
+    .await?;
+    PENDING.with(|m| {
+        let mut p = pending;
+        p.status = auto_settle::PendingStatus::Refunded;
+        m.borrow_mut().insert(pending_id, p);
+    });
+    Ok(())
 }
 
 #[derive(candid::CandidType, serde::Serialize)]

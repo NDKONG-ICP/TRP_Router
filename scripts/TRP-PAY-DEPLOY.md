@@ -104,9 +104,38 @@ Look up other pools via SwapFactory `4mmnk-kiaaa-aaaag-qbllq-cai` → `getPool` 
 
 **Deploy order:** `dfx deploy trp_pay` → `set_payment_token` for each asset → tiny mainnet buy per token → `CONFIRM_MAINNET=1 bash scripts/deploy-playground-only.sh` for wallet UI.
 
-## Phase B — auto-swap (NOT implemented yet)
+## Phase B — auto-swap token → ICP → cycles
 
-Planned: on `buy_credits_token`, swap token→ICP on ICPSwap (slippage bps), then existing CMC burn + treasury/LP split, idempotent failures + refund queue. Ship only after Phase A is stable and owner approves tiny mainnet swap tests (see `.cursor/rules/mainnet-icp-wallet-safety.mdc`).
+**Default: `auto_convert_enabled = false`** until you configure pools and run tiny mainnet tests.
+
+When enabled, `buy_credits_token` after pulling tokens:
+
+1. **ICPSwap** (ICRC-2 path): `icrc2_approve` pool → `depositFrom` → `swap` (with `amountOutMinimum` from quote × `(1 − slippage_bps)`) → `withdraw` ICP to `trp_pay`.
+2. **ICP split** (same as ICP packs): `split_purchase_icp_with_lp` → CMC burn on `7chv3` + treasury remainder.
+3. **On swap failure** (credits already granted): record **`admin_list_pending`**, attempt **token refund** to buyer; admin may **`admin_retry_conversion`** or **`admin_refund_pending`**.
+
+**Config** (via `set_config`):
+
+| Field | Default | Meaning |
+|-------|---------|---------|
+| `auto_convert_enabled` | false | Phase A treasury forward when false |
+| `slippage_bps` | 100 | 1% min-out vs pool quote |
+| `liquidity_share_bps` | 0 | Reserved for TRP LP (not wired) |
+| `liquidity_add_enabled` | false | Gate `increaseLiquidity` until $TRP pool exists |
+| `trp_liquidity_pool` | anonymous | Future TRP/<token> pool |
+
+**Enable (after Phase A tokens configured):**
+
+```bash
+dfx canister call trp_pay set_config "(record {
+  auto_convert_enabled = opt true;
+  slippage_bps = opt (100 : nat32);
+})" --network ic
+```
+
+**Smoke:** one minimal alt-token buy per asset; confirm `7chv3` cycles ↑ and treasury ICP; if pending row appears, use admin retry/refund — do not raise limits until clean.
+
+Mainnet swap moves real funds — get explicit owner approval before enabling (`.cursor/rules/mainnet-icp-wallet-safety.mdc`).
 
 ## CMC smoke buy (CLI)
 
