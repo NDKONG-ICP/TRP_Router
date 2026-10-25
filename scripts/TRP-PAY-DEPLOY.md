@@ -82,7 +82,17 @@ Wallet tab: quote packs, paid credit balance, **Approve + Buy** via ICRC-2. User
 - `buy_credits_token(pack_index, symbol)` — re-prices at call time, then `icrc2_transfer_from` + treasury forward
 - `$TRP`: keep `enabled = false` until a ledger exists (`ledger` must not be anonymous when enabled)
 
-**Configure a token (mainnet example — ckBTC / ICP pool from ICPSwap docs):**
+**Mainnet pool IDs (SwapFactory `4mmnk-kiaaa-aaaag-qbllq-cai`, fee 3000):**
+
+| Symbol | Ledger | Pool | sell_zero_for_one |
+|--------|--------|------|-------------------|
+| ckBTC | `mxzaz-hqaaa-aaaar-qaada-cai` | `xmiu5-jqaaa-aaaag-qbz7q-cai` | `true` (token0=ckBTC) |
+| ckETH | `ss2fx-dyaaa-aaaar-qacoq-cai` | `angxa-baaaa-aaaag-qcvnq-cai` | `false` (token0=ICP) |
+| ckUSDC | `xevnm-gaaaa-aaaar-qafnq-cai` | `mohjv-bqaaa-aaaag-qjyia-cai` | `false` (token0=ICP) |
+
+`quote_token` is an **update** call (not composite query) so ICPSwap pools on other subnets are reachable.
+
+**Configure a token (mainnet example — ckBTC):**
 
 ```bash
 export DFX_IDENTITY=ic_deploy_plain

@@ -28,4 +28,25 @@ d set_payment_token "(record {
   stub_token_base_per_icp_e8 = 0 : nat64;
 })"
 
-echo "Add ckETH / ckUSDC / ckSOL after resolving pool canister IDs from SwapFactory getPool."
+# ckETH / ckUSDC (SwapFactory fee 3000, token0=ICP for both → sell_zero_for_one = false)
+d set_payment_token "(record {
+  symbol = \"ckETH\";
+  ledger = principal \"ss2fx-dyaaa-aaaar-qacoq-cai\";
+  decimals = 18 : nat8;
+  icpswap_pool = principal \"angxa-baaaa-aaaag-qcvnq-cai\";
+  sell_zero_for_one = opt false;
+  enabled = true;
+  stub_token_base_per_icp_e8 = 0 : nat64;
+})"
+
+d set_payment_token "(record {
+  symbol = \"ckUSDC\";
+  ledger = principal \"xevnm-gaaaa-aaaar-qafnq-cai\";
+  decimals = 6 : nat8;
+  icpswap_pool = principal \"mohjv-bqaaa-aaaag-qjyia-cai\";
+  sell_zero_for_one = opt false;
+  enabled = true;
+  stub_token_base_per_icp_e8 = 0 : nat64;
+})"
+
+# ckSOL / $TRP: defer until pool + ledger confirmed on mainnet.

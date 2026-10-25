@@ -91,11 +91,7 @@
         ["query"],
       ),
       list_payment_tokens: IDL.Func([], [IDL.Vec(TokenCfg)], ["query"]),
-      quote_token: IDL.Func(
-        [IDL.Nat32, IDL.Text],
-        [QuoteTokenResult],
-        ["composite_query"],
-      ),
+      quote_token: IDL.Func([IDL.Nat32, IDL.Text], [QuoteTokenResult], []),
       credit_balance: IDL.Func([IDL.Principal], [IDL.Nat64], ["query"]),
       buy_credits: IDL.Func([IDL.Nat32], [NatResult], []),
       buy_credits_token: IDL.Func([IDL.Nat32, IDL.Text], [NatResult], []),

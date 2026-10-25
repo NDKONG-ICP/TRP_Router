@@ -610,7 +610,8 @@ enum QuoteTokenResult {
     Err(String),
 }
 
-#[ic_cdk_macros::query(composite = true)]
+/// Update (not composite query): ICPSwap pools are not reachable from composite queries on all subnets.
+#[ic_cdk_macros::update]
 async fn quote_token(pack_index: u32, symbol: String) -> QuoteTokenResult {
     match quote_token_inner(pack_index, &symbol).await {
         Ok(q) => QuoteTokenResult::Ok(q),

@@ -75,7 +75,7 @@ type QuoteTokenResult = variant { Ok : TokenQuote; Err : text };
 service : {
   // public
   quote : () -> (vec Pack) query;
-  quote_token : (nat32, text) -> (QuoteTokenResult) composite_query;
+  quote_token : (nat32, text) -> (QuoteTokenResult);
   credit_balance : (principal) -> (nat64) query;
   get_config : () -> (Config) query;
   get_convert_config : () -> (ConvertConfigView) query;
