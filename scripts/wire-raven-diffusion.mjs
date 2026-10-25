@@ -32,6 +32,12 @@ dfx(`canister call router_canister set_llama_qwen25 "(principal \\"${llamaId}\\"
 console.log("set_llama_qwen25", llamaId);
 
 let apiKey = process.env.TRP_PLAYGROUND_API_KEY;
+const cfgPath = join(root, "ui-mockup", "config.js");
+if (!apiKey && existsSync(cfgPath)) {
+  const prev = readFileSync(cfgPath, "utf8");
+  const m = prev.match(/apiKey:\s*"([^"]+)"/);
+  if (m) apiKey = m[1];
+}
 if (!apiKey) {
   apiKey = "trp_pg_" + randomBytes(18).toString("hex");
   console.log("generated TRP_PLAYGROUND_API_KEY (save for ui config.js):", apiKey);
@@ -40,7 +46,14 @@ const escaped = apiKey.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
 dfx(`canister call router_canister register_playground_api_key "(\\"${escaped}\\")"`);
 console.log("register_playground_api_key OK");
 
-const cfgPath = join(root, "ui-mockup", "config.js");
+try {
+  const pay = dfx("canister id trp_pay");
+  dfx(`canister call router_canister set_trp_pay "(principal \\"${pay}\\")"`);
+  console.log("set_trp_pay", pay);
+} catch {
+  console.log("set_trp_pay skipped (deploy trp_pay first)");
+}
+
 const routerId = dfx("canister id router_canister");
 let meterId = "6gk2j-eiaaa-aaaao-bbq5a-cai";
 try {
@@ -48,14 +61,21 @@ try {
 } catch {
   /* optional */
 }
+let payId = "";
+try {
+  payId = dfx("canister id trp_pay");
+} catch {
+  /* deploy trp_pay first */
+}
 const body = `window.TRP_PLAYGROUND = {
-  routerPostUrl: "https://${routerId}.icp0.io/v1",
+  routerPostUrl: "https://${routerId}.raw.icp0.io/v1",
   routerCanisterId: "${routerId}",
   apiKey: "${apiKey}",
   diffusionCanisterId: "${diffusion}",
   diffusionModuleSha: "d89a560af45e5a39b5e2ef1572152215b0c78c7690e3af997cb2ff780694c513",
   ravenNftCanisterId: "62oay-tiaaa-aaaao-bbq7a-cai",
   trpMeterCanisterId: "${meterId}",
+  trpPayCanisterId: "${payId}",
   icpLedgerCanisterId: "ryjl3-tyaaa-aaaaa-aaaba-cai",
 };
 `;

@@ -1,12 +1,21 @@
 use crate::mem::{vmem, Memory};
+use crate::playground_auth::ActorKind;
 use candid::Principal;
 use ic_stable_structures::{StableBTreeMap, StableCell, Storable};
 use std::borrow::Cow;
 use std::cell::RefCell;
 
-/// Free tier for on-chain Raven Diffusion (BETA — Phase 2: trp_meter prepaid credits).
-/// Shared across anonymous Playground users (keyed to the API-key principal); II users get their own.
-pub const RAVEN_DIFFUSION_DAILY_MAX: u32 = 50;
+/// Free tier: II-authenticated users (via `Authorization: Bearer ii:…`).
+pub const RAVEN_DIFFUSION_DAILY_MAX_II: u32 = 2;
+/// Shared playground API-key bucket (legacy beta).
+pub const RAVEN_DIFFUSION_DAILY_MAX_API_KEY: u32 = 50;
+
+pub fn daily_max_for(kind: ActorKind) -> u32 {
+    match kind {
+        ActorKind::InternetIdentity => RAVEN_DIFFUSION_DAILY_MAX_II,
+        ActorKind::ApiKeyShared => RAVEN_DIFFUSION_DAILY_MAX_API_KEY,
+    }
+}
 
 #[derive(Clone, candid::CandidType, serde::Serialize, serde::Deserialize)]
 struct DayCount {
@@ -67,7 +76,7 @@ fn utc_day_ns() -> u64 {
     ic_cdk::api::time() / 86_400_000_000_000
 }
 
-pub fn consume_raven_diffusion_slot(actor: Principal) -> Result<(), String> {
+pub fn consume_raven_diffusion_slot(actor: Principal, daily_max: u32) -> Result<(), String> {
     let day = utc_day_ns();
     let ok = DIFFUSION_DAILY.with(|m| {
         let mut map = m.borrow_mut();
@@ -77,7 +86,7 @@ pub fn consume_raven_diffusion_slot(actor: Principal) -> Result<(), String> {
         if row.day != day {
             row = DayCount { day, count: 0 };
         }
-        if row.count >= RAVEN_DIFFUSION_DAILY_MAX {
+        if row.count >= daily_max {
             return false;
         }
         row.count += 1;
@@ -88,7 +97,7 @@ pub fn consume_raven_diffusion_slot(actor: Principal) -> Result<(), String> {
         Ok(())
     } else {
         Err(format!(
-            "raven-diffusion daily quota ({RAVEN_DIFFUSION_DAILY_MAX}/day) exceeded"
+            "raven-diffusion daily quota ({daily_max}/day) exceeded"
         ))
     }
 }

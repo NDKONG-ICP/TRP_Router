@@ -12,6 +12,8 @@ mod onchain;
 mod pathc_client;
 mod payments;
 mod playground_auth;
+mod routing_store;
+mod trp_pay_client;
 mod raven_art;
 mod relay_client;
 
@@ -80,6 +82,13 @@ thread_local! {
     static REQ_SEQ: RefCell<u64> = RefCell::new(0);
     static DIFFUSION_CANISTER: RefCell<Option<Principal>> = RefCell::new(None);
     static TRP_METER: RefCell<Option<Principal>> = RefCell::new(None);
+}
+
+fn assert_controller() {
+    let c = caller();
+    if !ic_cdk::api::is_controller(&c) {
+        ic_cdk::trap("controller only");
+    }
 }
 
 fn next_req_seq() -> u64 {
@@ -228,6 +237,23 @@ fn set_diffusion_canister(diffusion: Principal) {
 #[update]
 fn set_trp_meter(meter: Principal) {
     TRP_METER.with(|m| *m.borrow_mut() = Some(meter));
+}
+
+#[update]
+fn set_trp_pay(pay: Principal) {
+    assert_controller();
+    routing_store::set_trp_pay_canister(pay);
+}
+
+#[query]
+fn get_trp_pay() -> Option<Principal> {
+    routing_store::trp_pay_canister()
+}
+
+#[update]
+fn clear_trp_meter() {
+    assert_controller();
+    TRP_METER.with(|m| *m.borrow_mut() = None);
 }
 
 /// Register a playground API key (SHA-256 stored). Controller-only.
@@ -384,29 +410,60 @@ fn is_raven_diffusion_model(model: Option<&str>) -> bool {
     )
 }
 
+/// Router free tier, then optional `trp_pay` credit. No meter job id.
+async fn acquire_raven_diffusion_slot(
+    actor: Principal,
+    daily_max: u32,
+) -> Result<Option<u64>, HttpResponse> {
+    if image_quota::consume_raven_diffusion_slot(actor, daily_max).is_ok() {
+        return Ok(None);
+    }
+    if let Some(pay) = routing_store::trp_pay_canister() {
+        if let Err(e) = trp_pay_client::consume_credit(pay, actor).await {
+            return Err(json_response(
+                429,
+                &format!(r#"{{"error":"{}"}}"#, e.replace('"', "\\\"")),
+            ));
+        }
+        return Ok(None);
+    }
+    let msg = format!(
+        "raven-diffusion daily quota ({daily_max}/day) exceeded; no paid credits"
+    );
+    Err(json_response(
+        429,
+        &format!(r#"{{"error":"{msg}"}}"#),
+    ))
+}
+
 async fn handle_raven_diffusion(
     headers: &[HeaderField],
     parsed: &ImageGenBody,
 ) -> HttpResponse {
-    let actor = match playground_auth::resolve_actor(headers) {
-        Ok(p) => p,
+    let actor_detail = match playground_auth::resolve_actor_detail(headers) {
+        Ok(d) => d,
         Err(resp) => return resp,
     };
+    let actor = actor_detail.principal;
+    let daily_max = image_quota::daily_max_for(actor_detail.kind);
     if let Err(e) = moderation::check_prompt_policy(&parsed.prompt) {
         return json_response(400, &format!(r#"{{"error":"{e}"}}"#));
     }
-    // Free-tier quota (BETA): router-side cap; meter adds reserve/settle when configured.
+    // Free-tier quota: router-side cap; optional legacy meter; trp_pay credits when exhausted.
     let meter = TRP_METER.with(|m| m.borrow().clone());
     let job_id = if let Some(m) = meter {
         match meter_client::begin_job(m, actor, "img-64-1").await {
             Ok(id) => Some(id),
-            Err(e) => return json_response(429, &format!(r#"{{"error":"{e}"}}"#)),
+            Err(_) => match acquire_raven_diffusion_slot(actor, daily_max).await {
+                Ok(j) => j,
+                Err(resp) => return resp,
+            },
         }
     } else {
-        if let Err(e) = image_quota::consume_raven_diffusion_slot(actor) {
-            return json_response(429, &format!(r#"{{"error":"{e}"}}"#));
+        match acquire_raven_diffusion_slot(actor, daily_max).await {
+            Ok(j) => j,
+            Err(resp) => return resp,
         }
-        None
     };
     let seed = parsed.seed.unwrap_or(4242);
     let actor_key = actor.to_text();
@@ -446,6 +503,23 @@ async fn handle_raven_diffusion(
     let mut resp = json_response(200, &body);
     resp.headers.push(HeaderField("X-TRP-On-Chain".into(), "true".into()));
     resp
+}
+
+/// Browser playground: same path as POST /v1/images/generations (raven-diffusion) without HTTP upgrade.
+#[update]
+async fn playground_image_generate(auth_token: String, prompt: String, seed: u64) -> String {
+    let headers = vec![HeaderField(
+        "x-oc-api-key".into(),
+        auth_token.trim().to_string(),
+    )];
+    let parsed = ImageGenBody {
+        prompt,
+        model: Some("raven-diffusion".to_string()),
+        size: None,
+        seed: Some(seed),
+    };
+    let resp = handle_raven_diffusion(&headers, &parsed).await;
+    String::from_utf8_lossy(&resp.body).into_owned()
 }
 
 async fn handle_images_generations(body: &[u8], headers: &[HeaderField]) -> HttpResponse {

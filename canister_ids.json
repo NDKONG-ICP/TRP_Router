@@ -8,8 +8,17 @@
   "llama_cpp_qwen25": {
     "ic": "5ryw3-vqaaa-aaaao-bbqvq-cai"
   },
+  "raven_nft": {
+    "ic": "62oay-tiaaa-aaaao-bbq7a-cai"
+  },
   "router_canister": {
     "ic": "5723t-oaaaa-aaaao-bbquq-cai"
+  },
+  "trp_meter": {
+    "ic": "6gk2j-eiaaa-aaaao-bbq5a-cai"
+  },
+  "trp_pay": {
+    "ic": "ujwwi-hiaaa-aaaao-bbrha-cai"
   },
   "trp_playground": {
     "ic": "6pjrv-saaaa-aaaao-bbq4q-cai"

@@ -8,17 +8,218 @@
   const principalUrl =
     "https://esm.sh/@dfinity/principal@" + AGENT_VER;
 
-  const cfg = () => window.TRP?.cfg?.() || {};
+  const cfg = () => window.TRP?.cfg?.() || window.TRP_PLAYGROUND || {};
   const meterId = () => cfg().trpMeterCanisterId || "6gk2j-eiaaa-aaaao-bbq5a-cai";
   const nftId = () => cfg().ravenNftCanisterId || "62oay-tiaaa-aaaao-bbq7a-cai";
+  const payId = () => cfg().trpPayCanisterId || "";
 
-  const balEl = document.getElementById("walletIcpBalance");
+  /** Mainnet ICRC-1 ledgers (decimals fetched at runtime). */
+  const WALLET_TOKENS = [
+    { symbol: "ICP", id: ICP_LEDGER },
+    { symbol: "ckBTC", id: "mxzaz-hqaaa-aaaar-qaada-cai" },
+    { symbol: "ckETH", id: "ss2fx-dyaaa-aaaar-qacoq-cai" },
+    { symbol: "ckUSD", id: "xevnm-gaaaa-aaaar-qafnq-cai", label: "ckUSDC" },
+    { symbol: "ckSOL", id: "ls5lp-lqaaa-aaaar-qb5oa-cai" },
+    { symbol: "$TRP", comingSoon: true },
+  ];
+
+  const tokenGrid = document.getElementById("walletTokenGrid");
   const meterEl = document.getElementById("walletMeterCredits");
   const prEl = document.getElementById("walletPrincipal");
+  const sendTokenSelect = document.getElementById("walletSendToken");
+  const sendAvailEl = document.getElementById("walletSendAvail");
+  const sendAmountEl = document.getElementById("walletSendAmount");
   const sendStatus = document.getElementById("walletSendStatus");
+
+  /** @type {Record<string, { id: string, decimals: number, balance: bigint, fee: bigint, formatted: string }>} */
+  const walletTokenState = {};
   const depositStatus = document.getElementById("walletDepositStatus");
   const nftGrid = document.getElementById("walletNftGrid");
   const nftStatus = document.getElementById("walletNftStatus");
+  const payCreditsEl = document.getElementById("walletPayCredits");
+  const packList = document.getElementById("walletPackList");
+  const buyStatus = document.getElementById("walletBuyStatus");
+
+  function payIdlFactory({ IDL }) {
+    const NatResult = IDL.Variant({ Ok: IDL.Nat64, Err: IDL.Text });
+    return IDL.Service({
+      quote: IDL.Func(
+        [],
+        [
+          IDL.Vec(
+            IDL.Record({
+              index: IDL.Nat32,
+              icp_e8s: IDL.Nat64,
+              credits: IDL.Nat64,
+            }),
+          ),
+        ],
+        ["query"],
+      ),
+      credit_balance: IDL.Func([IDL.Principal], [IDL.Nat64], ["query"]),
+      buy_credits: IDL.Func([IDL.Nat32], [NatResult], []),
+    });
+  }
+
+  function icrc1LedgerIdl({ IDL }) {
+    const Account = IDL.Record({
+      owner: IDL.Principal,
+      subaccount: IDL.Opt(IDL.Vec(IDL.Nat8)),
+    });
+    const TransferError = IDL.Variant({
+      BadFee: IDL.Record({ expected_fee: IDL.Nat }),
+      BadBurn: IDL.Record({ min_burn_amount: IDL.Nat }),
+      InsufficientFunds: IDL.Record({ balance: IDL.Nat }),
+      TooOld: IDL.Null,
+      CreatedInFuture: IDL.Record({ ledger_time: IDL.Nat64 }),
+      Duplicate: IDL.Record({ duplicate_of: IDL.Nat }),
+      TemporarilyUnavailable: IDL.Null,
+      GenericError: IDL.Record({ error_code: IDL.Nat, message: IDL.Text }),
+    });
+    return IDL.Service({
+      icrc1_balance_of: IDL.Func([Account], [IDL.Nat], ["query"]),
+      icrc1_decimals: IDL.Func([], [IDL.Nat8], ["query"]),
+      icrc1_fee: IDL.Func([], [IDL.Nat], ["query"]),
+      icrc1_transfer: IDL.Func(
+        [
+          IDL.Record({
+            from_subaccount: IDL.Opt(IDL.Vec(IDL.Nat8)),
+            to: Account,
+            amount: IDL.Nat,
+            fee: IDL.Opt(IDL.Nat),
+            memo: IDL.Opt(IDL.Vec(IDL.Nat8)),
+            created_at_time: IDL.Opt(IDL.Nat64),
+          }),
+        ],
+        [IDL.Variant({ Ok: IDL.Nat, Err: TransferError })],
+        [],
+      ),
+    });
+  }
+
+  function sendableTokens() {
+    return WALLET_TOKENS.filter(function (t) {
+      return !t.comingSoon && t.id;
+    });
+  }
+
+  function initSendTokenSelect() {
+    if (!sendTokenSelect) return;
+    sendTokenSelect.innerHTML = "";
+    sendableTokens().forEach(function (t) {
+      const opt = document.createElement("option");
+      opt.value = t.symbol;
+      opt.textContent = t.label ? t.symbol + " (" + t.label + ")" : t.symbol;
+      sendTokenSelect.appendChild(opt);
+    });
+  }
+
+  function updateSendAvailUi() {
+    if (!sendAvailEl || !sendTokenSelect) return;
+    const sym = sendTokenSelect.value;
+    const st = walletTokenState[sym];
+    if (!st) {
+      sendAvailEl.textContent = "Available —";
+      return;
+    }
+    sendAvailEl.textContent =
+      "Available " + st.formatted + " " + sym + " (fee " + formatTokenAmount(st.fee, st.decimals) + ")";
+  }
+
+  function maxSendAmountFor(sym) {
+    const st = walletTokenState[sym];
+    if (!st) return "";
+    const sendable = st.balance > st.fee ? st.balance - st.fee : 0n;
+    return formatTokenAmount(sendable, st.decimals);
+  }
+
+  function parseTokenAmount(text, decimals) {
+    const raw = String(text).trim().replace(/,/g, "");
+    if (!raw || !/^\d*\.?\d*$/.test(raw)) return null;
+    const d = Number(decimals);
+    const parts = raw.split(".");
+    const whole = parts[0] === "" ? "0" : parts[0];
+    let frac = parts[1] || "";
+    if (frac.length > d) return null;
+    frac = frac.padEnd(d, "0");
+    const combined = (whole + frac).replace(/^0+(?=\d)/, "") || "0";
+    try {
+      return BigInt(combined);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  function transferErrMessage(err) {
+    if (!err || typeof err !== "object") return "Transfer failed";
+    if (err.InsufficientFunds) return "Insufficient balance for amount + fee.";
+    if (err.BadFee) return "Wrong fee; expected " + String(err.BadFee.expected_fee);
+    if (err.GenericError) return err.GenericError.message || "Transfer failed";
+    const key = Object.keys(err)[0];
+    return key || "Transfer failed";
+  }
+
+  function formatTokenAmount(raw, decimals) {
+    const d = Number(decimals);
+    const n = typeof raw === "bigint" ? raw : BigInt(raw);
+    if (d <= 0) return n.toString();
+    const neg = n < 0n;
+    const abs = neg ? -n : n;
+    const s = abs.toString().padStart(d + 1, "0");
+    const whole = s.slice(0, -d) || "0";
+    let frac = s.slice(-d);
+    frac = frac.replace(/0+$/, "");
+    const out = frac ? whole + "." + frac : whole;
+    return (neg ? "-" : "") + out;
+  }
+
+  function renderTokenGrid(rows) {
+    if (!tokenGrid) return;
+    tokenGrid.innerHTML = "";
+    rows.forEach(function (row) {
+      const cell = document.createElement("div");
+      cell.className = "wallet-token-cell" + (row.comingSoon ? " soon" : "");
+      const sym = document.createElement("div");
+      sym.className = "sym";
+      sym.textContent = row.label || row.symbol;
+      const val = document.createElement("div");
+      val.className = "val";
+      val.textContent = row.value;
+      cell.appendChild(sym);
+      cell.appendChild(val);
+      tokenGrid.appendChild(cell);
+    });
+  }
+
+  function ledgerIcrc2Idl({ IDL }) {
+    const Account = IDL.Record({
+      owner: IDL.Principal,
+      subaccount: IDL.Opt(IDL.Vec(IDL.Nat8)),
+    });
+    const ApproveError = IDL.Variant({
+      BadFee: IDL.Record({ expected_fee: IDL.Nat }),
+      InsufficientFunds: IDL.Record({ balance: IDL.Nat }),
+      GenericError: IDL.Record({ error_code: IDL.Nat, message: IDL.Text }),
+    });
+    return IDL.Service({
+      icrc1_fee: IDL.Func([], [IDL.Nat], ["query"]),
+      icrc2_approve: IDL.Func(
+        [
+          IDL.Record({
+            from_subaccount: IDL.Opt(IDL.Vec(IDL.Nat8)),
+            spender: Account,
+            amount: IDL.Nat,
+            expires_at: IDL.Opt(IDL.Nat64),
+            fee: IDL.Opt(IDL.Nat),
+            memo: IDL.Opt(IDL.Vec(IDL.Nat8)),
+            created_at_time: IDL.Opt(IDL.Nat64),
+          }),
+        ],
+        [IDL.Variant({ Ok: IDL.Nat, Err: ApproveError })],
+        [],
+      ),
+    });
+  }
 
   function nftIdlFactory({ IDL }) {
     const Account = IDL.Record({
@@ -112,35 +313,221 @@
   }
 
   async function refreshBalances() {
+    const loadingRows = WALLET_TOKENS.map(function (t) {
+      return {
+        symbol: t.symbol,
+        label: t.label,
+        comingSoon: t.comingSoon,
+        value: t.comingSoon ? "Coming soon" : "…",
+      };
+    });
+    renderTokenGrid(loadingRows);
+
     try {
       const { agent, principal } = await agentWithII();
       if (prEl) prEl.textContent = principal;
-
-      const { AccountIdentifier, LedgerCanister } = await import(
-        "https://esm.sh/@dfinity/ledger-icp@2.4.1"
-      );
-      const ledger = LedgerCanister.create({ agent, canisterId: ICP_LEDGER });
-      const account = AccountIdentifier.fromPrincipal({
-        principal: agent.getPrincipal(),
-      });
-      const bal = await ledger.accountBalance({ accountIdentifier: account });
-      if (balEl) balEl.textContent = (Number(bal) / 1e8).toFixed(4) + " ICP";
+      if (sendStatus) sendStatus.textContent = "";
 
       const { Actor } = await import(agentUrl);
       const { IDL } = await import(candidUrl);
+      const { Principal } = await import(principalUrl);
+      const owner = Principal.fromText(principal);
+      const account = { owner, subaccount: [] };
+
+      Object.keys(walletTokenState).forEach(function (k) {
+        delete walletTokenState[k];
+      });
+
+      const rows = await Promise.all(
+        WALLET_TOKENS.map(async function (t) {
+          if (t.comingSoon) {
+            return {
+              symbol: t.symbol,
+              label: t.label,
+              comingSoon: true,
+              value: "Not available yet",
+            };
+          }
+          try {
+            const ledger = Actor.createActor(icrc1LedgerIdl, {
+              agent,
+              canisterId: t.id,
+            });
+            const [bal, decimals, fee] = await Promise.all([
+              ledger.icrc1_balance_of(account),
+              ledger.icrc1_decimals(),
+              ledger.icrc1_fee(),
+            ]);
+            const dec = Number(decimals);
+            const balBig = typeof bal === "bigint" ? bal : BigInt(bal);
+            const feeBig = typeof fee === "bigint" ? fee : BigInt(fee);
+            const formatted = formatTokenAmount(balBig, dec);
+            walletTokenState[t.symbol] = {
+              id: t.id,
+              decimals: dec,
+              balance: balBig,
+              fee: feeBig,
+              formatted,
+            };
+            return {
+              symbol: t.symbol,
+              label: t.label,
+              value: formatted,
+            };
+          } catch (err) {
+            return {
+              symbol: t.symbol,
+              label: t.label,
+              value: "—",
+            };
+          }
+        }),
+      );
+      renderTokenGrid(rows);
+      updateSendAvailUi();
+
       const meter = Actor.createActor(
         ({ IDL: I }) =>
           I.Service({
+            credit_balance_of: I.Func([I.Principal], [I.Nat], ["query"]),
             credit_balance: I.Func([], [I.Nat], ["query"]),
           }),
         { agent, canisterId: meterId() },
       );
-      const credits = await meter.credit_balance();
-      if (meterEl) meterEl.textContent = credits.toString() + " credits (~T cycles)";
+      let meterCredits;
+      try {
+        meterCredits = await meter.credit_balance_of(owner);
+      } catch (_) {
+        meterCredits = await meter.credit_balance();
+      }
+      if (meterEl)
+        meterEl.textContent =
+          meterCredits.toString() + " credits (~T cycles)";
+      await refreshPayCredits();
     } catch (e) {
-      if (balEl) balEl.textContent = "—";
+      renderTokenGrid(
+        WALLET_TOKENS.map(function (t) {
+          return {
+            symbol: t.symbol,
+            label: t.label,
+            comingSoon: t.comingSoon,
+            value: t.comingSoon ? "Not available yet" : "—",
+          };
+        }),
+      );
       if (meterEl) meterEl.textContent = "—";
-      if (sendStatus) sendStatus.textContent = "Sign in with II to view balances.";
+      if (sendStatus)
+        sendStatus.textContent =
+          "Sign in with II to view balances." +
+          (e && e.message ? " (" + e.message + ")" : "");
+    }
+  }
+
+  async function refreshPayCredits() {
+    if (!payCreditsEl) return;
+    const pid = payId();
+    if (!pid) {
+      payCreditsEl.textContent = "—";
+      return;
+    }
+    const { principal } = window.TRP.getII();
+    if (!principal) {
+      payCreditsEl.textContent = "—";
+      return;
+    }
+    try {
+      const { HttpAgent, Actor } = await import(agentUrl);
+      const { IDL } = await import(candidUrl);
+      const { Principal } = await import(principalUrl);
+      const agent = await HttpAgent.create({ host: "https://icp-api.io" });
+      const pay = Actor.createActor(payIdlFactory, { agent, canisterId: pid });
+      const bal = await pay.credit_balance(Principal.fromText(principal));
+      payCreditsEl.textContent = String(bal);
+    } catch (e) {
+      payCreditsEl.textContent = "—";
+    }
+  }
+
+  async function loadPacks() {
+    if (!packList) return;
+    const pid = payId();
+    if (!pid) {
+      packList.innerHTML =
+        '<p class="muted">Credits shop not configured (trpPayCanisterId).</p>';
+      return;
+    }
+    try {
+      const { HttpAgent, Actor } = await import(agentUrl);
+      const { IDL } = await import(candidUrl);
+      const agent = await HttpAgent.create({ host: "https://icp-api.io" });
+      const pay = Actor.createActor(payIdlFactory, { agent, canisterId: pid });
+      const packs = await pay.quote();
+      packList.innerHTML = "";
+      packs.forEach(function (p) {
+        const row = document.createElement("div");
+        row.className = "pack-row";
+        const icp = (Number(p.icp_e8s) / 1e8).toFixed(2);
+        row.innerHTML =
+          '<div class="meta"><strong>' +
+          p.credits +
+          " credits</strong> · " +
+          icp +
+          " ICP</div>";
+        const btn = document.createElement("button");
+        btn.type = "button";
+        btn.className = "btn primary mini";
+        btn.textContent = "Buy";
+        btn.addEventListener("click", function () {
+          buyPack(Number(p.index), p);
+        });
+        row.appendChild(btn);
+        packList.appendChild(row);
+      });
+    } catch (e) {
+      packList.innerHTML =
+        '<p class="nft-empty err">' + escapeHtml(String(e.message || e)) + "</p>";
+    }
+  }
+
+  async function buyPack(packIndex, pack) {
+    const pid = payId();
+    if (!pid) return;
+    if (buyStatus) buyStatus.textContent = "Sign in with Internet Identity…";
+    try {
+      await window.TRP.ensureII();
+      const { agent } = await agentWithII();
+      const { Actor } = await import(agentUrl);
+      const { IDL } = await import(candidUrl);
+      const { Principal } = await import(principalUrl);
+      const ledger = Actor.createActor(ledgerIcrc2Idl, {
+        agent,
+        canisterId: ICP_LEDGER,
+      });
+      const fee = BigInt(await ledger.icrc1_fee());
+      const approveAmt = BigInt(pack.icp_e8s) + fee;
+      if (buyStatus) buyStatus.textContent = "Approving ICP on ledger…";
+      const approveRes = await ledger.icrc2_approve({
+        from_subaccount: [],
+        spender: { owner: Principal.fromText(pid), subaccount: [] },
+        amount: approveAmt,
+        expires_at: [],
+        fee: [],
+        memo: [],
+        created_at_time: [],
+      });
+      if ("Err" in approveRes) {
+        throw new Error("Approve failed — check ICP balance on your II account.");
+      }
+      if (buyStatus) buyStatus.textContent = "Purchasing credits…";
+      const pay = Actor.createActor(payIdlFactory, { agent, canisterId: pid });
+      const res = await pay.buy_credits(packIndex);
+      if ("Err" in res) throw new Error(res.Err);
+      if (buyStatus)
+        buyStatus.textContent = "Credits updated — balance " + res.Ok + ".";
+      await refreshPayCredits();
+      await refreshBalances();
+    } catch (e) {
+      if (buyStatus) buyStatus.textContent = String(e.message || e);
     }
   }
 
@@ -293,32 +680,72 @@
     }
   }
 
-  async function sendIcp() {
+  async function sendToken() {
     const to = document.getElementById("walletSendTo")?.value?.trim();
-    const amt = document.getElementById("walletSendAmount")?.value?.trim();
-    if (!to || !amt) return;
-    if (sendStatus) sendStatus.textContent = "Sending…";
+    const amtText = sendAmountEl?.value?.trim();
+    const sym = sendTokenSelect?.value;
+    if (!to || !amtText || !sym) {
+      if (sendStatus) sendStatus.textContent = "Choose a token, recipient, and amount.";
+      return;
+    }
+    const st = walletTokenState[sym];
+    if (!st) {
+      if (sendStatus) sendStatus.textContent = "Refresh balances after signing in.";
+      return;
+    }
+    const amount = parseTokenAmount(amtText, st.decimals);
+    if (amount == null || amount <= 0n) {
+      if (sendStatus) sendStatus.textContent = "Enter a valid amount.";
+      return;
+    }
+    if (amount + st.fee > st.balance) {
+      if (sendStatus) sendStatus.textContent = "Amount plus fee exceeds your balance.";
+      return;
+    }
+    if (sendStatus) sendStatus.textContent = "Sending " + sym + "…";
     try {
       const { agent } = await agentWithII();
-      const { AccountIdentifier, LedgerCanister } = await import(
-        "https://esm.sh/@dfinity/ledger-icp@2.4.1"
-      );
+      const { Actor } = await import(agentUrl);
       const { Principal } = await import(principalUrl);
-      const ledger = LedgerCanister.create({ agent, canisterId: ICP_LEDGER });
-      const e8s = BigInt(Math.round(parseFloat(amt) * 1e8));
-      const dest = AccountIdentifier.fromPrincipal({
-        principal: Principal.fromText(to),
+      const ledger = Actor.createActor(icrc1LedgerIdl, {
+        agent,
+        canisterId: st.id,
       });
-      await ledger.transfer({
-        to: dest,
-        amount: e8s,
-        memo: 0n,
-        fee: 10000n,
+      const res = await ledger.icrc1_transfer({
+        from_subaccount: [],
+        to: { owner: Principal.fromText(to), subaccount: [] },
+        amount,
+        fee: [],
+        memo: [],
+        created_at_time: [],
       });
-      if (sendStatus) sendStatus.textContent = "Transfer submitted.";
-      refreshBalances();
+      if ("Err" in res) throw new Error(transferErrMessage(res.Err));
+      if (sendStatus)
+        sendStatus.textContent =
+          sym + " transfer submitted (block index " + res.Ok.toString() + ").";
+      if (sendAmountEl) sendAmountEl.value = "";
+      await refreshBalances();
     } catch (e) {
       if (sendStatus) sendStatus.textContent = String(e.message || e);
+    }
+  }
+
+  function fillSendMax() {
+    if (!sendTokenSelect || !sendAmountEl) return;
+    sendAmountEl.value = maxSendAmountFor(sendTokenSelect.value);
+  }
+
+  async function copyWalletPrincipal() {
+    const text = prEl?.textContent?.trim();
+    if (!text || text === "—") {
+      if (sendStatus) sendStatus.textContent = "Sign in to copy your principal.";
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(text);
+      if (sendStatus) sendStatus.textContent = "Principal copied — use it to receive any ICRC token.";
+    } catch (_) {
+      if (sendStatus) sendStatus.textContent = "Could not copy; select the principal text manually.";
     }
   }
 
@@ -351,6 +778,7 @@
   }
 
   async function refreshAll() {
+    await loadPacks();
     await refreshBalances();
     await loadNfts();
   }
@@ -360,11 +788,21 @@
     refreshAll();
   });
   document.getElementById("walletRefresh")?.addEventListener("click", refreshAll);
-  document.getElementById("walletSendBtn")?.addEventListener("click", sendIcp);
+  document.getElementById("walletSendBtn")?.addEventListener("click", sendToken);
+  document.getElementById("walletSendMax")?.addEventListener("click", fillSendMax);
+  sendTokenSelect?.addEventListener("change", function () {
+    updateSendAvailUi();
+    if (sendAmountEl) sendAmountEl.value = "";
+  });
+  document.getElementById("walletCopyPrincipal")?.addEventListener("click", copyWalletPrincipal);
   document.getElementById("walletDepositBtn")?.addEventListener("click", depositMeter);
+
+  initSendTokenSelect();
 
   const meterLabel = document.getElementById("walletMeterId");
   if (meterLabel) meterLabel.textContent = meterId();
+
+  loadPacks();
 
   window.TRP.restoreII().then(function (p) {
     if (p) refreshAll();

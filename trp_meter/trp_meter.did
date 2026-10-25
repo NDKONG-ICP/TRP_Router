@@ -5,7 +5,8 @@ service : {
   init_meter : (nat32, nat64) -> (); // free_images_per_day, free_budget_tc_per_day (trillion cycles units = TC * 1e12? use raw TC as u64 * 1e12 simplified: pass TC as number * 1_000_000_000_000)
   set_router : (principal) -> ();
   deposit_cycles : () -> (nat64);
-  credit_balance : () -> (nat64) query;
+  credit_balance : () -> (nat) query;
+  credit_balance_of : (principal) -> (nat) query;
   quote : (text) -> (record { credits : nat64; tier : text }) query;
   begin_job : (principal, text) -> (JobResult);
   settle_job : (nat64) -> (MeterResult);

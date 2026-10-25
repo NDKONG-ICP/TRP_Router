@@ -11,6 +11,7 @@ const MAX_LOAD_STEPS: u32 = 500;
 const MAX_GEN_STEPS: u32 = 500;
 const DEFAULT_WIDTH: u32 = 64;
 const DEFAULT_HEIGHT: u32 = 64;
+/// Mainnet 7chv3 currently stable at 1 step (multi-step traps until diffusion wasm upgrade).
 const DEFAULT_STEPS: u32 = 1;
 
 #[derive(CandidType, Deserialize)]

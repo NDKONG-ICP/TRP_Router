@@ -1,0 +1,8 @@
+[
+  {
+    "match": "**/*",
+    "headers": {
+      "Cache-Control": "no-cache"
+    }
+  }
+]

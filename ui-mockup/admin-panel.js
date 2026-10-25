@@ -19,6 +19,7 @@
   const meterId = () => cfg().trpMeterCanisterId || "6gk2j-eiaaa-aaaao-bbq5a-cai";
   const diffusionId = () =>
     cfg().diffusionCanisterId || "7chv3-5iaaa-aaaao-bbq3a-cai";
+  const payId = () => cfg().trpPayCanisterId || "ujwwi-hiaaa-aaaao-bbrha-cai";
 
   const gateEl = document.getElementById("adminGate");
   const dashEl = document.getElementById("adminDashboard");
@@ -43,6 +44,25 @@
         ],
         ["query"],
       ),
+      router_status: IDL.Func(
+        [],
+        [
+          IDL.Record({
+            providers: IDL.Vec(
+              IDL.Record({
+                name: IDL.Text,
+                healthy: IDL.Bool,
+                last_error: IDL.Opt(IDL.Text),
+                circuit_open: IDL.Bool,
+              }),
+            ),
+            payments_enabled: IDL.Bool,
+            onchain_models_ready: IDL.Bool,
+          }),
+        ],
+        ["query"],
+      ),
+      get_trp_pay: IDL.Func([], [IDL.Opt(IDL.Principal)], ["query"]),
     });
   }
 
@@ -58,15 +78,217 @@
         ],
         ["query"],
       ),
-      credit_balance: IDL.Func([], [IDL.Nat], ["query"]),
+      credit_balance: IDL.Func([], [IDL.Nat], ["query"]), // on-chain nat, not nat64
     });
   }
 
   async function anonActor(idlFactory, canisterId) {
     const { HttpAgent, Actor } = await import(agentUrl);
-    const { IDL } = await import(candidUrl);
+    await import(candidUrl);
     const agent = await HttpAgent.create({ host: "https://icp-api.io" });
     return Actor.createActor(idlFactory, { agent, canisterId });
+  }
+
+  async function adminPayActor() {
+    const { HttpAgent, Actor } = await import(agentUrl);
+    const { IDL } = await import(candidUrl);
+    const { Principal } = await import(
+      "https://esm.sh/@dfinity/principal@" + AGENT_VER
+    );
+    await window.TRP.ensureII();
+    const { authIdentity } = window.TRP.getII();
+    const agent = await HttpAgent.create({
+      host: "https://icp-api.io",
+      identity: authIdentity,
+    });
+    const NatResult = IDL.Variant({ Ok: IDL.Nat64, Err: IDL.Text });
+    const OkErr = function (t) {
+      return IDL.Variant({ Ok: t, Err: IDL.Text });
+    };
+    const idl = ({ IDL: I }) =>
+      I.Service({
+        get_config: I.Func(
+          [],
+          [
+            I.Record({
+              payments_enabled: I.Bool,
+              treasury: I.Principal,
+              cycles_slice_e8s: I.Nat64,
+            }),
+          ],
+          ["query"],
+        ),
+        set_config: I.Func(
+          [
+            I.Record({
+              payments_enabled: I.Opt(I.Bool),
+              icp_ledger: I.Opt(I.Principal),
+              treasury: I.Opt(I.Principal),
+              diffusion_canister: I.Opt(I.Principal),
+              cmc: I.Opt(I.Principal),
+              router: I.Opt(I.Principal),
+              cycles_slice_e8s: I.Opt(I.Nat64),
+            }),
+          ],
+          [OkErr(I.Null)],
+          [],
+        ),
+        admin_treasury_view: I.Func(
+          [],
+          [
+            OkErr(
+              I.Record({
+                payments_enabled: I.Bool,
+                treasury: I.Principal,
+                pay_canister_icp_e8s: I.Nat64,
+                cycles_slice_e8s: I.Nat64,
+              }),
+            ),
+          ],
+          [],
+        ),
+        admin_list_credit_balances: I.Func(
+          [I.Nat32],
+          [OkErr(I.Vec(I.Record({ user: I.Principal, credits: I.Nat64 })))],
+          ["query"],
+        ),
+        admin_list_recent_purchases: I.Func(
+          [I.Nat32],
+          [
+            OkErr(
+              I.Vec(
+                I.Record({
+                  id: I.Nat64,
+                  user: I.Principal,
+                  pack_index: I.Nat32,
+                  icp_e8s: I.Nat64,
+                  credits: I.Nat64,
+                  at_ns: I.Nat64,
+                }),
+              ),
+            ),
+          ],
+          ["query"],
+        ),
+        sweep_to_treasury: I.Func([], [NatResult], []),
+        admin_refund_icp: I.Func([I.Principal, I.Nat64], [NatResult], []),
+        admin_grant_credits: I.Func([I.Principal, I.Nat64], [NatResult], []),
+        admin_set_treasury: I.Func([I.Principal], [OkErr(I.Null)], []),
+        admin_treasury_icp_balance_e8s: I.Func(
+          [],
+          [OkErr(I.Nat64)],
+          [],
+        ),
+      });
+    return {
+      actor: Actor.createActor(idl, { agent, canisterId: payId() }),
+      Principal,
+    };
+  }
+
+  function setPayStatus(msg) {
+    const el = document.getElementById("adminPayStatus");
+    if (el) el.textContent = msg || "";
+  }
+
+  function renderCreditList(rows) {
+    const el = document.getElementById("adminCreditList");
+    if (!el) return;
+    if (!rows || !rows.length) {
+      el.innerHTML = "<p>No credit balances yet.</p>";
+      return;
+    }
+    el.innerHTML = rows
+      .map(function (r) {
+        return (
+          '<div class="admin-table-row">' +
+          r.user.toText() +
+          " · <strong>" +
+          r.credits +
+          "</strong> credits</div>"
+        );
+      })
+      .join("");
+  }
+
+  function renderPurchaseList(rows) {
+    const el = document.getElementById("adminPurchaseList");
+    if (!el) return;
+    if (!rows || !rows.length) {
+      el.innerHTML = "<p>No purchases logged yet (upgraded canister).</p>";
+      return;
+    }
+    el.innerHTML = rows
+      .map(function (r) {
+        const icp = (Number(r.icp_e8s) / 1e8).toFixed(4);
+        return (
+          '<div class="admin-table-row">#' +
+          r.id +
+          " · " +
+          r.user.toText() +
+          " · " +
+          icp +
+          " ICP → " +
+          r.credits +
+          " cr</div>"
+        );
+      })
+      .join("");
+  }
+
+  async function refreshPayments() {
+    try {
+      const { actor } = await adminPayActor();
+      const [viewRes, balRes, purRes] = await Promise.all([
+        actor.admin_treasury_view(),
+        actor.admin_list_credit_balances(100),
+        actor.admin_list_recent_purchases(50),
+      ]);
+      if ("Err" in viewRes) throw new Error(viewRes.Err);
+      const v = viewRes.Ok;
+      const toggle = document.getElementById("adminPaymentsToggle");
+      if (toggle) {
+        toggle.textContent = v.payments_enabled ? "ON" : "OFF";
+        toggle.setAttribute("aria-pressed", v.payments_enabled ? "true" : "false");
+      }
+      setText(
+        "adminPayCanisterIcp",
+        (Number(v.pay_canister_icp_e8s) / 1e8).toFixed(6) + " ICP",
+      );
+      setText("adminCyclesSlice", String(v.cycles_slice_e8s));
+      const tid = document.getElementById("adminTreasuryId");
+      if (tid) tid.textContent = v.treasury.toText();
+      try {
+        const tb = await actor.admin_treasury_icp_balance_e8s();
+        if ("Ok" in tb) {
+          setText(
+            "adminTreasuryIcp",
+            (Number(tb.Ok) / 1e8).toFixed(6) + " ICP",
+          );
+        }
+      } catch (e) {
+        setText("adminTreasuryIcp", "—");
+      }
+      if ("Ok" in balRes) renderCreditList(balRes.Ok);
+      if ("Ok" in purRes) renderPurchaseList(purRes.Ok);
+      setPayStatus("");
+    } catch (e) {
+      setPayStatus(String(e.message || e));
+    }
+  }
+
+  async function togglePayments() {
+    try {
+      const { actor } = await adminPayActor();
+      const cfgNow = await actor.get_config();
+      const next = !cfgNow.payments_enabled;
+      const res = await actor.set_config({ payments_enabled: [next] });
+      if ("Err" in res) throw new Error(res.Err);
+      setPayStatus(next ? "Payments enabled." : "Payments disabled.");
+      await refreshPayments();
+    } catch (e) {
+      setPayStatus(String(e.message || e));
+    }
   }
 
   function setText(id, text) {
@@ -184,11 +406,21 @@
   }
 
   async function fetchRouterStatus() {
-    const base = window.TRP?.routerQueryBase?.() || "";
-    const url = (base || "https://5723t-oaaaa-aaaao-bbquq-cai.raw.icp0.io") + "/v1/status";
-    const res = await fetch(url);
-    if (!res.ok) throw new Error("status " + res.status);
-    return res.json();
+    const router = await anonActor(routerIdl, routerId());
+    const st = await router.router_status();
+    let trpPayText = null;
+    try {
+      const pay = await router.get_trp_pay();
+      if (pay && pay.length && pay[0]) trpPayText = pay[0].toText();
+    } catch (e) {
+      /* optional on older router wasm */
+    }
+    return {
+      providers: st.providers,
+      payments_enabled: st.payments_enabled,
+      onchain_models_ready: st.onchain_models_ready,
+      trp_pay: trpPayText,
+    };
   }
 
   function renderHealth(st, err) {
@@ -224,27 +456,36 @@
       (st.onchain_models_ready ? "ready" : "not ready") +
       '</span></div><div class="admin-health-row"><span class="nm">diffusion canister</span><span class="mono muted">' +
       diffusionId() +
-      '</span></div><div class="admin-health-row"><span class="nm">payments</span><span class="badge ' +
-      (st.payments_enabled ? "ok" : "muted") +
+      '</span></div><div class="admin-health-row"><span class="nm">trp_pay (router)</span><span class="badge ' +
+      (st.trp_pay ? "ok" : "warn") +
       '">' +
-      (st.payments_enabled ? "enabled" : "off") +
+      (st.trp_pay || "not wired") +
       "</span></div>";
   }
 
   async function refreshMetrics() {
     if (!dashEl || dashEl.hasAttribute("hidden")) return;
+    let gen = 0;
+    let tc = 0;
     try {
       const router = await anonActor(routerIdl, routerId());
+      const stats = await router.generation_stats();
+      gen = Number(stats.total_generations);
+      tc = Number(stats.cycles_burned_est) / 1e12;
+      setText("adminGenTotal", gen.toLocaleString("en-US"));
+      setText("adminCyclesTotal", "≈ " + tc.toFixed(3) + " TC");
+      await ensureCharts();
+      pushHistory(gen, tc);
+    } catch (e) {
+      setText("adminGenTotal", "—");
+      setText("adminCyclesTotal", "—");
+    }
+    try {
       const meter = await anonActor(meterIdl, meterId());
-      const [stats, mstat, credits] = await Promise.all([
-        router.generation_stats(),
+      const [mstat, credits] = await Promise.all([
         meter.meter_status(),
         meter.credit_balance(),
       ]);
-      const gen = Number(stats.total_generations);
-      const tc = Number(stats.cycles_burned_est) / 1e12;
-      setText("adminGenTotal", gen.toLocaleString("en-US"));
-      setText("adminCyclesTotal", "≈ " + tc.toFixed(3) + " TC");
       setText(
         "adminMeterBudget",
         Number(mstat.free_budget_tc_remaining).toLocaleString("en-US") + " TC",
@@ -253,21 +494,22 @@
         "adminMeterSpent",
         Number(mstat.global_free_spent_tc).toLocaleString("en-US") + " TC",
       );
-      setText("adminMeterCredits", credits.toString());
-      await ensureCharts();
-      pushHistory(gen, tc);
-      try {
-        const st = await fetchRouterStatus();
-        renderHealth(st, null);
-      } catch (e) {
-        renderHealth(null, e);
-      }
+      setText(
+        "adminMeterCredits",
+        typeof credits === "bigint" ? credits.toString() : String(credits),
+      );
     } catch (e) {
-      setText("adminGenTotal", "—");
-      if (healthEl)
-        healthEl.innerHTML =
-          '<p class="mono err">' + String(e.message || e) + "</p>";
+      setText("adminMeterBudget", "—");
+      setText("adminMeterSpent", "—");
+      setText("adminMeterCredits", "—");
     }
+    try {
+      const st = await fetchRouterStatus();
+      renderHealth(st, null);
+    } catch (e) {
+      renderHealth(null, e);
+    }
+    await refreshPayments();
   }
 
   async function showDashboard() {
@@ -318,6 +560,73 @@
 
   document.getElementById("adminSignIn")?.addEventListener("click", checkAccess);
   document.getElementById("adminRefresh")?.addEventListener("click", refreshMetrics);
+  document.getElementById("adminPaymentsToggle")?.addEventListener("click", togglePayments);
+  document.getElementById("adminRefreshPay")?.addEventListener("click", refreshPayments);
+  document.getElementById("adminSweepTreasury")?.addEventListener("click", async function () {
+    try {
+      const { actor } = await adminPayActor();
+      const res = await actor.sweep_to_treasury();
+      if ("Err" in res) throw new Error(res.Err);
+      setPayStatus("Swept " + res.Ok + " e8s to treasury.");
+      await refreshPayments();
+    } catch (e) {
+      setPayStatus(String(e.message || e));
+    }
+  });
+  document.getElementById("adminRefundBtn")?.addEventListener("click", async function () {
+    try {
+      const { actor, Principal } = await adminPayActor();
+      const p = document.getElementById("adminRefundPrincipal")?.value?.trim();
+      const icp = Number(document.getElementById("adminRefundIcp")?.value);
+      if (!p || !icp) throw new Error("Principal and ICP amount required.");
+      const e8s = BigInt(Math.round(icp * 1e8));
+      const res = await actor.admin_refund_icp(Principal.fromText(p), e8s);
+      if ("Err" in res) throw new Error(res.Err);
+      setPayStatus("Refunded " + icp + " ICP to " + p);
+      await refreshPayments();
+    } catch (e) {
+      setPayStatus(String(e.message || e));
+    }
+  });
+  document.getElementById("adminTreasuryToII")?.addEventListener("click", async function () {
+    try {
+      const { actor, Principal } = await adminPayActor();
+      const { principal } = window.TRP.getII();
+      const res = await actor.admin_set_treasury(Principal.fromText(principal));
+      if ("Err" in res) throw new Error(res.Err);
+      setPayStatus("Treasury set to your II: " + principal);
+      await refreshPayments();
+    } catch (e) {
+      setPayStatus(String(e.message || e));
+    }
+  });
+  document.getElementById("adminTreasurySet")?.addEventListener("click", async function () {
+    try {
+      const { actor, Principal } = await adminPayActor();
+      const p = document.getElementById("adminTreasuryInput")?.value?.trim();
+      if (!p) throw new Error("Enter treasury principal.");
+      const res = await actor.admin_set_treasury(Principal.fromText(p));
+      if ("Err" in res) throw new Error(res.Err);
+      setPayStatus("Treasury updated.");
+      await refreshPayments();
+    } catch (e) {
+      setPayStatus(String(e.message || e));
+    }
+  });
+  document.getElementById("adminGrantBtn")?.addEventListener("click", async function () {
+    try {
+      const { actor, Principal } = await adminPayActor();
+      const p = document.getElementById("adminRefundPrincipal")?.value?.trim();
+      const n = Number(document.getElementById("adminGrantCredits")?.value);
+      if (!p || !n) throw new Error("Principal and credits required.");
+      const res = await actor.admin_grant_credits(Principal.fromText(p), BigInt(n));
+      if ("Err" in res) throw new Error(res.Err);
+      setPayStatus("Granted " + n + " credits; balance " + res.Ok);
+      await refreshPayments();
+    } catch (e) {
+      setPayStatus(String(e.message || e));
+    }
+  });
 
   window.TRP_ADMIN = { onViewVisible, onViewHidden, checkAccess };
 })();

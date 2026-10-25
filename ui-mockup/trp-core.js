@@ -1,5 +1,6 @@
 /** Shared playground config, router headers, II session, prompt→seed helper. */
 (function () {
+  const AGENT_VER = "2.4.1";
   const cfg = () => window.TRP_PLAYGROUND || {};
 
   function routerPostBase() {
@@ -18,7 +19,18 @@
     return routerQueryBase() + "/v1/models";
   }
 
+  /** POST /v1/* — use raw.icp0.io (boundary on icp0.io breaks CORS preflight). */
+  function routerPostUrl() {
+    const base = routerQueryBase();
+    return base ? base + "/v1" : "";
+  }
+
   function routerAuthHeaders() {
+    if (iiPrincipal) {
+      const iiToken = "ii:" + iiPrincipal;
+      // Browser: only x-oc-api-key (simple header). icp0 boundary drops Authorization.
+      return { "x-oc-api-key": iiToken };
+    }
     const key = cfg().apiKey || "";
     if (!key) return {};
     return { "x-oc-api-key": key };
@@ -82,12 +94,26 @@
     return { authClient, authIdentity, principal: iiPrincipal };
   }
 
+  /**
+   * POST to router HTTP (raw.icp0.io). Boundary handles IC HTTP upgrade; do not use HttpAgent.fetch (not in agent 2.4.1).
+   * @param {string} path e.g. "/images/generations" under /v1
+   * @param {RequestInit} init
+   */
+  async function routerFetch(path, init) {
+    const base = routerPostUrl();
+    if (!base) throw new Error("Missing routerPostUrl in config.js");
+    const p = path.startsWith("/") ? path : "/" + path;
+    return fetch(base + p, Object.assign({ mode: "cors" }, init || {}));
+  }
+
   window.TRP = {
     cfg,
     routerPostBase,
     routerQueryBase,
+    routerPostUrl,
     modelsListUrl,
     routerAuthHeaders,
+    routerFetch,
     promptSeed,
     ensureII,
     restoreII,

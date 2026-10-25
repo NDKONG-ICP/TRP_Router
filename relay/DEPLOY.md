@@ -10,6 +10,8 @@ npm install
 wrangler login
 ```
 
+Before deploy, if your shell sourced `trp-router/.env`, run `unset CLOUDFLARE_API_TOKEN` so Wrangler uses OAuth (the AI-only token lacks Workers script access).
+
 ## Secrets (production)
 
 ```bash

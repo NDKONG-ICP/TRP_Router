@@ -70,16 +70,35 @@ fn unauthorized(msg: &str) -> HttpResponse {
     )
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ActorKind {
+    InternetIdentity,
+    ApiKeyShared,
+}
+
+pub struct ActorDetail {
+    pub principal: Principal,
+    pub kind: ActorKind,
+}
+
 /// Resolve the quota principal for a playground / image request.
 pub fn resolve_actor(headers: &[HeaderField]) -> Result<Principal, HttpResponse> {
+    resolve_actor_detail(headers).map(|d| d.principal)
+}
+
+pub fn resolve_actor_detail(headers: &[HeaderField]) -> Result<ActorDetail, HttpResponse> {
     let Some(token) = bearer_token(headers) else {
         return Err(unauthorized(
             "missing Authorization: Bearer (API key or ii:<principal>)",
         ));
     };
     if let Some(principal_text) = token.strip_prefix("ii:") {
-        return Principal::from_text(principal_text.trim()).map_err(|_| {
+        let p = Principal::from_text(principal_text.trim()).map_err(|_| {
             unauthorized("invalid ii: principal in Authorization header")
+        })?;
+        return Ok(ActorDetail {
+            principal: p,
+            kind: ActorKind::InternetIdentity,
         });
     }
     let h = hash_key(&token);
@@ -87,7 +106,10 @@ pub fn resolve_actor(headers: &[HeaderField]) -> Result<Principal, HttpResponse>
     if !accepted {
         return Err(unauthorized("invalid API key"));
     }
-    Ok(Principal::self_authenticating(format!("trp-key:{token}").as_bytes()))
+    Ok(ActorDetail {
+        principal: Principal::self_authenticating(format!("trp-key:{token}").as_bytes()),
+        kind: ActorKind::ApiKeyShared,
+    })
 }
 
 /// Controller-only: register a shared beta API key (stored as SHA-256, not plaintext).

@@ -13,6 +13,7 @@
 //!   23 payments::HOLDER_FREE
 //!   30 image_quota::DIFFUSION_DAILY
 //!   31 image_quota::GEN_TOTAL (global generation counter)
+//!   32 routing_store::TRP_PAY_CELL
 
 use ic_stable_structures::memory_manager::{MemoryId, MemoryManager, VirtualMemory};
 use ic_stable_structures::DefaultMemoryImpl;

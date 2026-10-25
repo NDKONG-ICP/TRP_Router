@@ -5,12 +5,14 @@
 //!      canister as spender) with their II — same way the mint signs calls.
 //!   2. The user calls `buy_credits(pack)`; this canister pulls the ICP with
 //!      `icrc2_transfer_from` and grants credits.
-//!   3. (Phase 2) the payment is split: a slice -> cycles via the CMC onto the
-//!      diffusion canister (the "burn"), the remainder -> the treasury.
+//!   3. The payment is split: `cycles_slice_e8s * credits` -> CMC top-up on the
+//!      diffusion canister (burn); remainder -> treasury (best-effort).
 //!
 //! Safety: ships `payments_enabled = false` and a configurable ledger, so
 //! nothing moves real ICP until an admin configures and enables it. Test on
 //! the mock ledger first.
+
+mod payment_route;
 
 use candid::{CandidType, Deserialize, Nat, Principal};
 use ic_stable_structures::memory_manager::{MemoryId, MemoryManager, VirtualMemory};
@@ -28,10 +30,16 @@ const PACKS: &[(u64, u64)] = &[
 ];
 
 // ── ICRC-2 types (ICP ledger) ──
-#[derive(CandidType, Deserialize, Clone)]
-struct Account {
+#[derive(CandidType, Deserialize, Clone, Debug)]
+pub(crate) struct Account {
     owner: Principal,
     subaccount: Option<Vec<u8>>,
+}
+
+#[derive(CandidType, Deserialize, Debug)]
+enum NatResult {
+    Ok(u64),
+    Err(String),
 }
 #[derive(CandidType, Deserialize)]
 struct TransferFromArgs {
@@ -80,7 +88,8 @@ impl Default for Config {
         Config {
             payments_enabled: false,
             icp_ledger: p("ryjl3-tyaaa-aaaaa-aaaba-cai"), // ICP ledger
-            treasury: p("crpau-rqaaa-aaaao-a4neq-cai"),   // Raven treasury vault
+            // Default until set_config; production treasury = admin II ledger account (not Plug).
+            treasury: p("72w3b-oy3is-urqu2-sjyxa-oh5nc-lfs2i-p3mzm-tq3j5-pokxx-hc7ym-wqe"),
             diffusion_canister: p("7chv3-5iaaa-aaaao-bbq3a-cai"),
             cmc: p("rkp4c-7iaaa-aaaaa-aaaca-cai"), // Cycles Minting Canister
             router: Principal::anonymous(),
@@ -135,6 +144,68 @@ thread_local! {
     );
     static CREDITS: RefCell<StableBTreeMap<PrincipalKey, CreditBal, Memory>> =
         RefCell::new(StableBTreeMap::init(MM.with(|m| m.borrow().get(MemoryId::new(1)))));
+    static PURCHASES: RefCell<StableBTreeMap<u64, PurchaseRecord, Memory>> =
+        RefCell::new(StableBTreeMap::init(MM.with(|m| m.borrow().get(MemoryId::new(2)))));
+    static NEXT_PURCHASE_ID: RefCell<StableCell<PurchaseId, Memory>> = RefCell::new(
+        StableCell::init(
+            MM.with(|m| m.borrow().get(MemoryId::new(3))),
+            PurchaseId(0),
+        )
+        .expect("init purchase id"),
+    );
+}
+
+#[derive(Clone, Copy, Default)]
+struct PurchaseId(u64);
+impl Storable for PurchaseId {
+    fn to_bytes(&self) -> Cow<[u8]> {
+        Cow::Owned(self.0.to_le_bytes().to_vec())
+    }
+    fn from_bytes(bytes: Cow<[u8]>) -> Self {
+        let mut a = [0u8; 8];
+        a.copy_from_slice(&bytes[..8]);
+        PurchaseId(u64::from_le_bytes(a))
+    }
+    const BOUND: Bound = Bound::Bounded { max_size: 8, is_fixed_size: true };
+}
+
+#[derive(Clone, candid::CandidType, serde::Serialize, serde::Deserialize)]
+struct PurchaseRecord {
+    user: Principal,
+    pack_index: u32,
+    icp_e8s: u64,
+    credits: u64,
+    at_ns: u64,
+}
+
+impl Storable for PurchaseRecord {
+    fn to_bytes(&self) -> Cow<[u8]> {
+        Cow::Owned(candid::encode_one(self).expect("encode PurchaseRecord"))
+    }
+    fn from_bytes(bytes: Cow<[u8]>) -> Self {
+        candid::decode_one(bytes.as_ref()).expect("decode PurchaseRecord")
+    }
+    const BOUND: Bound = Bound::Unbounded;
+}
+
+fn log_purchase(user: Principal, pack_index: u32, icp_e8s: u64, credits: u64) {
+    let id = NEXT_PURCHASE_ID.with(|n| {
+        let cur = n.borrow().get().0;
+        let _ = n.borrow_mut().set(PurchaseId(cur.saturating_add(1)));
+        cur
+    });
+    let rec = PurchaseRecord {
+        user,
+        pack_index,
+        icp_e8s,
+        credits,
+        at_ns: ic_cdk::api::time(),
+    };
+    PURCHASES.with(|m| m.borrow_mut().insert(id, rec));
+}
+
+fn require_admin_query() -> Result<(), String> {
+    require_admin()
 }
 
 fn config() -> Config {
@@ -201,6 +272,28 @@ fn set_config(u: ConfigUpdate) -> Result<(), String> {
     });
     Ok(())
 }
+/// Route future pack remainders to this principal's ICP ledger account (admin-controlled).
+#[ic_cdk_macros::update]
+fn admin_set_treasury(treasury: Principal) -> Result<(), String> {
+    require_admin()?;
+    mutate_config(|c| c.treasury = treasury);
+    Ok(())
+}
+
+#[ic_cdk_macros::update]
+async fn admin_treasury_icp_balance_e8s() -> Result<u64, String> {
+    require_admin()?;
+    let cfg = config();
+    let acct = Account {
+        owner: cfg.treasury,
+        subaccount: None,
+    };
+    let (bal,): (Nat,) = ic_cdk::call(cfg.icp_ledger, "icrc1_balance_of", (acct,))
+        .await
+        .map_err(|e| format!("treasury balance: {e:?}"))?;
+    Ok(bal.0.try_into().unwrap_or(0))
+}
+
 #[ic_cdk_macros::update]
 fn add_admin(p: Principal) -> Result<(), String> {
     require_admin()?;
@@ -243,7 +336,14 @@ fn credit_balance(user: Principal) -> u64 {
 
 /// Buy a credit pack: pulls ICP the caller has pre-approved to this canister.
 #[ic_cdk_macros::update]
-async fn buy_credits(pack_index: u32) -> Result<u64, String> {
+async fn buy_credits(pack_index: u32) -> NatResult {
+    match buy_credits_inner(pack_index).await {
+        Ok(b) => NatResult::Ok(b),
+        Err(e) => NatResult::Err(e),
+    }
+}
+
+async fn buy_credits_inner(pack_index: u32) -> Result<u64, String> {
     let cfg = config();
     if !cfg.payments_enabled {
         return Err("payments are not enabled yet".to_string());
@@ -279,16 +379,132 @@ async fn buy_credits(pack_index: u32) -> Result<u64, String> {
     let new_bal = credit_of(&caller) + credits;
     set_credit(&caller, new_bal);
 
-    // Phase 2 TODO: split the received ICP — route cfg.cycles_slice_e8s per
-    // credit to the CMC to mint cycles onto cfg.diffusion_canister (the burn),
-    // and forward the remainder to cfg.treasury. Until then the ICP is held in
-    // this canister's own ledger account (admin can sweep it to treasury).
+    log_purchase(caller, pack_index, icp_e8s, credits);
+
+    payment_route::split_purchase_icp(
+        cfg.icp_ledger,
+        cfg.cmc,
+        cfg.treasury,
+        cfg.diffusion_canister,
+        icp_e8s,
+        credits,
+        cfg.cycles_slice_e8s,
+    )
+    .await;
+
     Ok(new_bal)
+}
+
+#[derive(candid::CandidType, serde::Serialize)]
+struct CreditRow {
+    user: Principal,
+    credits: u64,
+}
+
+#[ic_cdk_macros::query]
+fn admin_list_credit_balances(limit: u32) -> Result<Vec<CreditRow>, String> {
+    require_admin_query()?;
+    let cap = limit.max(1).min(500) as usize;
+    let rows = CREDITS.with(|m| {
+        m.borrow()
+            .iter()
+            .take(cap)
+            .map(|(k, v)| CreditRow {
+                user: k.0,
+                credits: v.0,
+            })
+            .collect()
+    });
+    Ok(rows)
+}
+
+#[derive(candid::CandidType, serde::Serialize)]
+struct PurchaseRow {
+    id: u64,
+    user: Principal,
+    pack_index: u32,
+    icp_e8s: u64,
+    credits: u64,
+    at_ns: u64,
+}
+
+#[ic_cdk_macros::query]
+fn admin_list_recent_purchases(limit: u32) -> Result<Vec<PurchaseRow>, String> {
+    require_admin_query()?;
+    let cap = limit.max(1).min(200) as usize;
+    let rows = PURCHASES.with(|m| {
+        let map = m.borrow();
+        let mut ids: Vec<u64> = map.iter().map(|(id, _)| id).collect();
+        ids.sort_unstable();
+        ids.reverse();
+        ids.into_iter()
+            .take(cap)
+            .filter_map(|id| {
+                map.get(&id).map(|rec| PurchaseRow {
+                    id,
+                    user: rec.user,
+                    pack_index: rec.pack_index,
+                    icp_e8s: rec.icp_e8s,
+                    credits: rec.credits,
+                    at_ns: rec.at_ns,
+                })
+            })
+            .collect()
+    });
+    Ok(rows)
+}
+
+#[derive(candid::CandidType, serde::Serialize)]
+struct TreasuryView {
+    payments_enabled: bool,
+    treasury: Principal,
+    pay_canister_icp_e8s: u64,
+    cycles_slice_e8s: u64,
+}
+
+#[ic_cdk_macros::update]
+async fn admin_treasury_view() -> Result<TreasuryView, String> {
+    require_admin()?;
+    let cfg = config();
+    let self_acct = Account {
+        owner: ic_cdk::id(),
+        subaccount: None,
+    };
+    let (bal,): (Nat,) = ic_cdk::call(cfg.icp_ledger, "icrc1_balance_of", (self_acct,))
+        .await
+        .map_err(|e| format!("balance_of: {e:?}"))?;
+    let bal_u64: u64 = bal.0.try_into().unwrap_or(0);
+    Ok(TreasuryView {
+        payments_enabled: cfg.payments_enabled,
+        treasury: cfg.treasury,
+        pay_canister_icp_e8s: bal_u64,
+        cycles_slice_e8s: cfg.cycles_slice_e8s,
+    })
+}
+
+/// Refund ICP held on this canister (e.g. split failed) back to a user ledger account.
+#[ic_cdk_macros::update]
+async fn admin_refund_icp(to: Principal, amount_e8s: u64) -> NatResult {
+    if let Err(e) = require_admin() {
+        return NatResult::Err(e);
+    }
+    let cfg = config();
+    match payment_route::route_treasury(cfg.icp_ledger, to, amount_e8s).await {
+        Ok(()) => NatResult::Ok(amount_e8s),
+        Err(e) => NatResult::Err(e),
+    }
 }
 
 /// Spend one credit for `user`. Callable by the router (or an admin) only.
 #[ic_cdk_macros::update]
-fn consume_credit(user: Principal) -> Result<u64, String> {
+fn consume_credit(user: Principal) -> NatResult {
+    match consume_credit_inner(user) {
+        Ok(b) => NatResult::Ok(b),
+        Err(e) => NatResult::Err(e),
+    }
+}
+
+fn consume_credit_inner(user: Principal) -> Result<u64, String> {
     let cfg = config();
     let caller = ic_cdk::caller();
     if caller != cfg.router && !is_admin(&caller) {
@@ -305,11 +521,31 @@ fn consume_credit(user: Principal) -> Result<u64, String> {
 
 /// Admin: grant credits without payment (promos, support, testing).
 #[ic_cdk_macros::update]
-fn admin_grant_credits(user: Principal, amount: u64) -> Result<u64, String> {
+fn admin_grant_credits(user: Principal, amount: u64) -> NatResult {
+    match admin_grant_credits_inner(user, amount) {
+        Ok(b) => NatResult::Ok(b),
+        Err(e) => NatResult::Err(e),
+    }
+}
+
+fn admin_grant_credits_inner(user: Principal, amount: u64) -> Result<u64, String> {
     require_admin()?;
     let new_bal = credit_of(&user) + amount;
     set_credit(&user, new_bal);
     Ok(new_bal)
+}
+
+/// Admin fallback: move all ICP on this canister (minus fee) to treasury.
+#[ic_cdk_macros::update]
+async fn sweep_to_treasury() -> NatResult {
+    if let Err(e) = require_admin() {
+        return NatResult::Err(e);
+    }
+    let cfg = config();
+    match payment_route::sweep_icp_balance_to_treasury(cfg.icp_ledger, cfg.treasury).await {
+        Ok(n) => NatResult::Ok(n),
+        Err(e) => NatResult::Err(e),
+    }
 }
 
 ic_cdk::export_candid!();

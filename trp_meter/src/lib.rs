@@ -180,10 +180,14 @@ fn deposit_cycles() -> Nat {
 
 #[query]
 fn credit_balance() -> Nat {
-    let p = caller();
+    credit_balance_of(caller())
+}
+
+#[query]
+fn credit_balance_of(owner: Principal) -> Nat {
     Nat::from(
         BALANCES
-            .with(|b| b.borrow().get(&p).map(|c| c.0).unwrap_or(0)),
+            .with(|b| b.borrow().get(&owner).map(|c| c.0).unwrap_or(0)),
     )
 }
 
