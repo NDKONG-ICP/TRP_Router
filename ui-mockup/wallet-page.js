@@ -369,4 +369,11 @@
   window.TRP.restoreII().then(function (p) {
     if (p) refreshAll();
   });
+
+  window.addEventListener("hashchange", function () {
+    if (location.hash === "#wallet") {
+      const s = window.TRP.getII && window.TRP.getII();
+      if (s && s.principal) refreshAll();
+    }
+  });
 })();

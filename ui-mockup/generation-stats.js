@@ -12,7 +12,6 @@
 
   let displayedGen = null;
   let displayedTc = null;
-  let animFrame = null;
 
   function routerId() {
     const c = window.TRP_PLAYGROUND || {};
@@ -55,7 +54,7 @@
   }
 
   function animateValue(el, from, to, formatFn, durationMs, onDone) {
-    if (animFrame) cancelAnimationFrame(animFrame);
+    if (el._af) cancelAnimationFrame(el._af);
     const start = performance.now();
     const f = from == null ? to : from;
     const delta = to - f;
@@ -69,14 +68,14 @@
       const ease = 1 - Math.pow(1 - t, 3);
       const cur = f + delta * ease;
       el.textContent = formatFn(cur);
-      if (t < 1) animFrame = requestAnimationFrame(frame);
+      if (t < 1) el._af = requestAnimationFrame(frame);
       else {
         el.textContent = formatFn(to);
         pulse(el);
         onDone && onDone();
       }
     }
-    animFrame = requestAnimationFrame(frame);
+    el._af = requestAnimationFrame(frame);
   }
 
   function renderStats(stats) {

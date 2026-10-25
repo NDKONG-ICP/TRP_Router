@@ -11,6 +11,7 @@
   /** UX gate only — real admin checks must use an on-chain is_admin query later. */
   const ADMIN_PRINCIPALS = new Set([
     "ucw6l-apn5m-ycnrv-s7xtt-lvchu-jz5f3-3oeq7-ttuhk-rjvjp-sdnbj-lqe",
+    "72w3b-oy3is-urqu2-sjyxa-oh5nc-lfs2i-p3mzm-tq3j5-pokxx-hc7ym-wqe",
   ]);
 
   const cfg = () => window.TRP?.cfg?.() || window.TRP_PLAYGROUND || {};
