@@ -52,6 +52,11 @@
       "type": "rust",
       "package": "raven_nft",
       "candid": "raven_nft/raven_nft.did"
+    },
+    "trp_pay": {
+      "type": "rust",
+      "package": "trp_pay",
+      "candid": "trp_pay/trp_pay.did"
     }
   },
   "defaults": {

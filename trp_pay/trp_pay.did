@@ -1,0 +1,43 @@
+// trp_pay — ICP (ICRC-2) payments -> Raven Diffusion generation credits.
+
+type Config = record {
+  payments_enabled : bool;
+  icp_ledger : principal;
+  treasury : principal;
+  diffusion_canister : principal;
+  cmc : principal;
+  router : principal;
+  admins : vec principal;
+  cycles_slice_e8s : nat64;
+};
+
+type ConfigUpdate = record {
+  payments_enabled : opt bool;
+  icp_ledger : opt principal;
+  treasury : opt principal;
+  diffusion_canister : opt principal;
+  cmc : opt principal;
+  router : opt principal;
+  cycles_slice_e8s : opt nat64;
+};
+
+type Pack = record { index : nat32; icp_e8s : nat64; credits : nat64 };
+
+type UnitResult = variant { Ok; Err : text };
+type NatResult = variant { Ok : nat64; Err : text };
+
+service : {
+  // public
+  quote : () -> (vec Pack) query;
+  credit_balance : (principal) -> (nat64) query;
+  get_config : () -> (Config) query;
+  buy_credits : (nat32) -> (NatResult);
+
+  // router / admin
+  consume_credit : (principal) -> (NatResult);
+
+  // admin
+  set_config : (ConfigUpdate) -> (UnitResult);
+  add_admin : (principal) -> (UnitResult);
+  admin_grant_credits : (principal, nat64) -> (NatResult);
+};
