@@ -81,6 +81,175 @@ pub struct SupportedStandard {
     pub url: String,
 }
 
+// ─────────────────────────── ICRC-37 (approvals / transfer_from) ───────────────────────────
+
+#[derive(CandidType, Deserialize, Clone, Debug)]
+pub struct ApprovalInfo {
+    pub spender: Account,
+    pub from_subaccount: Option<Vec<u8>>,
+    pub expires_at: Option<u64>,
+    pub memo: Option<Vec<u8>>,
+    pub created_at_time: Option<u64>,
+}
+
+#[derive(CandidType, Deserialize)]
+pub struct ApproveTokenArg {
+    pub token_id: Nat,
+    pub approval_info: ApprovalInfo,
+}
+#[derive(CandidType, Deserialize)]
+pub enum ApproveTokenError {
+    InvalidSpender,
+    Unauthorized,
+    NonExistingTokenId,
+    TooOld,
+    CreatedInFuture { ledger_time: u64 },
+    GenericError { error_code: Nat, message: String },
+    GenericBatchError { error_code: Nat, message: String },
+}
+#[derive(CandidType, Deserialize)]
+pub enum ApproveTokenResult {
+    Ok(Nat),
+    Err(ApproveTokenError),
+}
+
+#[derive(CandidType, Deserialize)]
+pub struct ApproveCollectionArg {
+    pub approval_info: ApprovalInfo,
+}
+#[derive(CandidType, Deserialize)]
+pub enum ApproveCollectionError {
+    InvalidSpender,
+    TooOld,
+    CreatedInFuture { ledger_time: u64 },
+    GenericError { error_code: Nat, message: String },
+    GenericBatchError { error_code: Nat, message: String },
+}
+#[derive(CandidType, Deserialize)]
+pub enum ApproveCollectionResult {
+    Ok(Nat),
+    Err(ApproveCollectionError),
+}
+
+#[derive(CandidType, Deserialize)]
+pub struct RevokeTokenApprovalArg {
+    pub token_id: Nat,
+    pub from_subaccount: Option<Vec<u8>>,
+    pub spender: Option<Account>,
+    pub memo: Option<Vec<u8>>,
+    pub created_at_time: Option<u64>,
+}
+#[derive(CandidType, Deserialize)]
+pub enum RevokeTokenApprovalError {
+    ApprovalDoesNotExist,
+    Unauthorized,
+    NonExistingTokenId,
+    TooOld,
+    CreatedInFuture { ledger_time: u64 },
+    GenericError { error_code: Nat, message: String },
+    GenericBatchError { error_code: Nat, message: String },
+}
+#[derive(CandidType, Deserialize)]
+pub enum RevokeTokenApprovalResult {
+    Ok(Nat),
+    Err(RevokeTokenApprovalError),
+}
+
+#[derive(CandidType, Deserialize)]
+pub struct RevokeCollectionApprovalArg {
+    pub from_subaccount: Option<Vec<u8>>,
+    pub spender: Option<Account>,
+    pub memo: Option<Vec<u8>>,
+    pub created_at_time: Option<u64>,
+}
+#[derive(CandidType, Deserialize)]
+pub enum RevokeCollectionApprovalError {
+    ApprovalDoesNotExist,
+    TooOld,
+    CreatedInFuture { ledger_time: u64 },
+    GenericError { error_code: Nat, message: String },
+    GenericBatchError { error_code: Nat, message: String },
+}
+#[derive(CandidType, Deserialize)]
+pub enum RevokeCollectionApprovalResult {
+    Ok(Nat),
+    Err(RevokeCollectionApprovalError),
+}
+
+#[derive(CandidType, Deserialize)]
+pub struct IsApprovedArg {
+    pub spender: Account,
+    pub from_subaccount: Option<Vec<u8>>,
+    pub token_id: Nat,
+}
+
+#[derive(CandidType, Deserialize)]
+pub struct TokenApproval {
+    pub token_id: Nat,
+    pub approval_info: ApprovalInfo,
+}
+
+#[derive(CandidType, Deserialize)]
+pub struct TransferFromArg {
+    pub spender_subaccount: Option<Vec<u8>>,
+    pub from: Account,
+    pub to: Account,
+    pub token_id: Nat,
+    pub memo: Option<Vec<u8>>,
+    pub created_at_time: Option<u64>,
+}
+#[derive(CandidType, Deserialize)]
+pub enum TransferFromError {
+    InvalidRecipient,
+    Unauthorized,
+    NonExistingTokenId,
+    TooOld,
+    CreatedInFuture { ledger_time: u64 },
+    Duplicate { duplicate_of: Nat },
+    GenericError { error_code: Nat, message: String },
+    GenericBatchError { error_code: Nat, message: String },
+}
+#[derive(CandidType, Deserialize)]
+pub enum TransferFromResult {
+    Ok(Nat),
+    Err(TransferFromError),
+}
+
+/// Stored approval record (one spender's approval of a token or of a collection).
+#[derive(CandidType, Deserialize, Clone)]
+struct Approval {
+    spender: Principal,
+    spender_subaccount: Option<Vec<u8>>,
+    expires_at: Option<u64>,
+    created_at: u64,
+}
+
+#[derive(CandidType, Deserialize, Default)]
+struct ApprovalList(Vec<Approval>);
+
+impl Storable for ApprovalList {
+    fn to_bytes(&self) -> Cow<[u8]> {
+        Cow::Owned(candid::encode_one(self).expect("encode ApprovalList"))
+    }
+    fn from_bytes(bytes: Cow<[u8]>) -> Self {
+        candid::decode_one(&bytes).expect("decode ApprovalList")
+    }
+    const BOUND: Bound = Bound::Unbounded;
+}
+
+/// Storable Principal key for the collection-approval map.
+#[derive(CandidType, Deserialize, Clone, PartialEq, Eq, PartialOrd, Ord)]
+struct PrincipalKey(Principal);
+impl Storable for PrincipalKey {
+    fn to_bytes(&self) -> Cow<[u8]> {
+        Cow::Owned(self.0.as_slice().to_vec())
+    }
+    fn from_bytes(bytes: Cow<[u8]>) -> Self {
+        PrincipalKey(Principal::from_slice(&bytes))
+    }
+    const BOUND: Bound = Bound::Bounded { max_size: 30, is_fixed_size: false };
+}
+
 // ─────────────────────────── mint API ───────────────────────────
 
 #[derive(CandidType, Deserialize)]
@@ -180,6 +349,13 @@ thread_local! {
     // Per-principal mint rate limiting (in-heap; resets on upgrade, which is fine
     // for abuse control). Maps principal -> (day_bucket, count_in_day).
     static RATE: RefCell<HashMap<Principal, (u64, u32)>> = RefCell::new(HashMap::new());
+
+    // ICRC-37 approvals. token_id -> list of per-token approvals.
+    static TOKEN_APPROVALS: RefCell<StableBTreeMap<u64, ApprovalList, Memory>> =
+        RefCell::new(StableBTreeMap::init(MM.with(|m| m.borrow().get(MemoryId::new(2)))));
+    // owner principal -> list of collection-wide approvals granted by that owner.
+    static COLLECTION_APPROVALS: RefCell<StableBTreeMap<PrincipalKey, ApprovalList, Memory>> =
+        RefCell::new(StableBTreeMap::init(MM.with(|m| m.borrow().get(MemoryId::new(3)))));
 }
 
 fn with_config<R>(f: impl FnOnce(&Config) -> R) -> R {
@@ -534,6 +710,10 @@ fn icrc10_supported_standards() -> Vec<SupportedStandard> {
             name: "ICRC-10".to_string(),
             url: "https://github.com/dfinity/ICRC/tree/main/ICRCs/ICRC-10".to_string(),
         },
+        SupportedStandard {
+            name: "ICRC-37".to_string(),
+            url: "https://github.com/dfinity/ICRC/tree/main/ICRCs/ICRC-37".to_string(),
+        },
     ]
 }
 
@@ -578,10 +758,337 @@ fn transfer_one(caller: Principal, now: u64, arg: TransferArg) -> TransferResult
         rec.owner = arg.to.owner;
         rec.owner_subaccount = arg.to.subaccount.clone();
         tokens.insert(token_id, rec);
+        clear_token_approvals(token_id); // ICRC-37: active token approvals end on transfer
         let tx = with_config(|c| c.tx_counter);
         mutate_config(|c| c.tx_counter = tx + 1);
         TransferResult::Ok(Nat::from(tx))
     })
+}
+
+// ─────────────────────────── ICRC-37 (approvals / transfer_from) ───────────────────────────
+
+const MAX_APPROVALS_PER_TOKEN_OR_COLLECTION: u64 = 10;
+const MAX_REVOKE_APPROVALS: u64 = 10;
+
+fn clear_token_approvals(token_id: u64) {
+    TOKEN_APPROVALS.with(|m| m.borrow_mut().remove(&token_id));
+}
+
+fn next_tx() -> u64 {
+    let tx = with_config(|c| c.tx_counter);
+    mutate_config(|c| c.tx_counter = tx + 1);
+    tx
+}
+
+fn approval_live(a: &Approval, now: u64) -> bool {
+    a.expires_at.map_or(true, |e| e > now)
+}
+
+/// Is `spender` approved to move `token_id` currently owned by `owner`?
+fn is_spender_approved(token_id: u64, owner: &Account, spender: &Account, now: u64) -> bool {
+    let matches = |a: &Approval| {
+        a.spender == spender.owner
+            && a.spender_subaccount == spender.subaccount
+            && approval_live(a, now)
+    };
+    let token_ok = TOKEN_APPROVALS
+        .with(|m| m.borrow().get(&token_id).map(|l| l.0.iter().any(matches)))
+        .unwrap_or(false);
+    if token_ok {
+        return true;
+    }
+    COLLECTION_APPROVALS
+        .with(|m| {
+            m.borrow()
+                .get(&PrincipalKey(owner.owner))
+                .map(|l| l.0.iter().any(matches))
+        })
+        .unwrap_or(false)
+}
+
+fn put_approval(list: &mut ApprovalList, spender: &Account, expires_at: Option<u64>, now: u64) {
+    // replace an existing approval for the same spender, else push (bounded).
+    list.0.retain(|a| {
+        !(a.spender == spender.owner && a.spender_subaccount == spender.subaccount)
+    });
+    if (list.0.len() as u64) < MAX_APPROVALS_PER_TOKEN_OR_COLLECTION {
+        list.0.push(Approval {
+            spender: spender.owner,
+            spender_subaccount: spender.subaccount.clone(),
+            expires_at,
+            created_at: now,
+        });
+    }
+}
+
+#[ic_cdk_macros::query]
+fn icrc37_max_approvals_per_token_or_collection() -> Option<Nat> {
+    Some(Nat::from(MAX_APPROVALS_PER_TOKEN_OR_COLLECTION))
+}
+
+#[ic_cdk_macros::query]
+fn icrc37_max_revoke_approvals() -> Option<Nat> {
+    Some(Nat::from(MAX_REVOKE_APPROVALS))
+}
+
+#[ic_cdk_macros::update]
+fn icrc37_approve_tokens(args: Vec<ApproveTokenArg>) -> Vec<Option<ApproveTokenResult>> {
+    let caller = ic_cdk::caller();
+    let now = ic_cdk::api::time();
+    args.into_iter()
+        .map(|arg| {
+            let token_id = match nat_to_u64(&arg.token_id) {
+                Some(id) => id,
+                None => return Some(ApproveTokenResult::Err(ApproveTokenError::NonExistingTokenId)),
+            };
+            let owner = TOKENS.with(|t| t.borrow().get(&token_id).map(|r| r.owner));
+            match owner {
+                None => Some(ApproveTokenResult::Err(ApproveTokenError::NonExistingTokenId)),
+                Some(o) if o != caller => {
+                    Some(ApproveTokenResult::Err(ApproveTokenError::Unauthorized))
+                }
+                Some(_) => {
+                    if arg.approval_info.spender.owner == caller {
+                        return Some(ApproveTokenResult::Err(ApproveTokenError::InvalidSpender));
+                    }
+                    TOKEN_APPROVALS.with(|m| {
+                        let mut map = m.borrow_mut();
+                        let mut list = map.get(&token_id).unwrap_or_default();
+                        put_approval(&mut list, &arg.approval_info.spender, arg.approval_info.expires_at, now);
+                        map.insert(token_id, list);
+                    });
+                    Some(ApproveTokenResult::Ok(Nat::from(next_tx())))
+                }
+            }
+        })
+        .collect()
+}
+
+#[ic_cdk_macros::update]
+fn icrc37_approve_collection(args: Vec<ApproveCollectionArg>) -> Vec<Option<ApproveCollectionResult>> {
+    let caller = ic_cdk::caller();
+    let now = ic_cdk::api::time();
+    args.into_iter()
+        .map(|arg| {
+            if arg.approval_info.spender.owner == caller {
+                return Some(ApproveCollectionResult::Err(ApproveCollectionError::InvalidSpender));
+            }
+            COLLECTION_APPROVALS.with(|m| {
+                let mut map = m.borrow_mut();
+                let mut list = map.get(&PrincipalKey(caller)).unwrap_or_default();
+                put_approval(&mut list, &arg.approval_info.spender, arg.approval_info.expires_at, now);
+                map.insert(PrincipalKey(caller), list);
+            });
+            Some(ApproveCollectionResult::Ok(Nat::from(next_tx())))
+        })
+        .collect()
+}
+
+#[ic_cdk_macros::update]
+fn icrc37_revoke_token_approvals(
+    args: Vec<RevokeTokenApprovalArg>,
+) -> Vec<Option<RevokeTokenApprovalResult>> {
+    let caller = ic_cdk::caller();
+    args.into_iter()
+        .map(|arg| {
+            let token_id = match nat_to_u64(&arg.token_id) {
+                Some(id) => id,
+                None => {
+                    return Some(RevokeTokenApprovalResult::Err(
+                        RevokeTokenApprovalError::NonExistingTokenId,
+                    ))
+                }
+            };
+            let owner = TOKENS.with(|t| t.borrow().get(&token_id).map(|r| r.owner));
+            match owner {
+                None => Some(RevokeTokenApprovalResult::Err(
+                    RevokeTokenApprovalError::NonExistingTokenId,
+                )),
+                Some(o) if o != caller => Some(RevokeTokenApprovalResult::Err(
+                    RevokeTokenApprovalError::Unauthorized,
+                )),
+                Some(_) => {
+                    let existed = TOKEN_APPROVALS.with(|m| {
+                        let mut map = m.borrow_mut();
+                        let mut list = map.get(&token_id).unwrap_or_default();
+                        let before = list.0.len();
+                        match &arg.spender {
+                            Some(sp) => list.0.retain(|a| {
+                                !(a.spender == sp.owner && a.spender_subaccount == sp.subaccount)
+                            }),
+                            None => list.0.clear(), // revoke all
+                        }
+                        let changed = list.0.len() != before;
+                        map.insert(token_id, list);
+                        changed
+                    });
+                    if existed {
+                        Some(RevokeTokenApprovalResult::Ok(Nat::from(next_tx())))
+                    } else {
+                        Some(RevokeTokenApprovalResult::Err(
+                            RevokeTokenApprovalError::ApprovalDoesNotExist,
+                        ))
+                    }
+                }
+            }
+        })
+        .collect()
+}
+
+#[ic_cdk_macros::update]
+fn icrc37_revoke_collection_approvals(
+    args: Vec<RevokeCollectionApprovalArg>,
+) -> Vec<Option<RevokeCollectionApprovalResult>> {
+    let caller = ic_cdk::caller();
+    args.into_iter()
+        .map(|arg| {
+            let existed = COLLECTION_APPROVALS.with(|m| {
+                let mut map = m.borrow_mut();
+                let mut list = map.get(&PrincipalKey(caller)).unwrap_or_default();
+                let before = list.0.len();
+                match &arg.spender {
+                    Some(sp) => list.0.retain(|a| {
+                        !(a.spender == sp.owner && a.spender_subaccount == sp.subaccount)
+                    }),
+                    None => list.0.clear(),
+                }
+                let changed = list.0.len() != before;
+                map.insert(PrincipalKey(caller), list);
+                changed
+            });
+            if existed {
+                Some(RevokeCollectionApprovalResult::Ok(Nat::from(next_tx())))
+            } else {
+                Some(RevokeCollectionApprovalResult::Err(
+                    RevokeCollectionApprovalError::ApprovalDoesNotExist,
+                ))
+            }
+        })
+        .collect()
+}
+
+#[ic_cdk_macros::query]
+fn icrc37_is_approved(args: Vec<IsApprovedArg>) -> Vec<bool> {
+    let now = ic_cdk::api::time();
+    args.into_iter()
+        .map(|arg| match nat_to_u64(&arg.token_id) {
+            None => false,
+            Some(id) => {
+                let owner = TOKENS.with(|t| {
+                    t.borrow().get(&id).map(|r| Account {
+                        owner: r.owner,
+                        subaccount: r.owner_subaccount.clone(),
+                    })
+                });
+                match owner {
+                    None => false,
+                    Some(o) => is_spender_approved(id, &o, &arg.spender, now),
+                }
+            }
+        })
+        .collect()
+}
+
+#[ic_cdk_macros::query]
+fn icrc37_get_token_approvals(
+    token_id: Nat,
+    _prev: Option<TokenApproval>,
+    _take: Option<Nat>,
+) -> Vec<TokenApproval> {
+    let now = ic_cdk::api::time();
+    let id = match nat_to_u64(&token_id) {
+        Some(i) => i,
+        None => return vec![],
+    };
+    TOKEN_APPROVALS.with(|m| {
+        m.borrow()
+            .get(&id)
+            .map(|l| {
+                l.0.iter()
+                    .filter(|a| approval_live(a, now))
+                    .map(|a| TokenApproval {
+                        token_id: token_id.clone(),
+                        approval_info: ApprovalInfo {
+                            spender: Account { owner: a.spender, subaccount: a.spender_subaccount.clone() },
+                            from_subaccount: None,
+                            expires_at: a.expires_at,
+                            memo: None,
+                            created_at_time: Some(a.created_at),
+                        },
+                    })
+                    .collect()
+            })
+            .unwrap_or_default()
+    })
+}
+
+#[ic_cdk_macros::query]
+fn icrc37_get_collection_approvals(
+    owner: Account,
+    _prev: Option<ApprovalInfo>,
+    _take: Option<Nat>,
+) -> Vec<ApprovalInfo> {
+    let now = ic_cdk::api::time();
+    COLLECTION_APPROVALS.with(|m| {
+        m.borrow()
+            .get(&PrincipalKey(owner.owner))
+            .map(|l| {
+                l.0.iter()
+                    .filter(|a| approval_live(a, now))
+                    .map(|a| ApprovalInfo {
+                        spender: Account { owner: a.spender, subaccount: a.spender_subaccount.clone() },
+                        from_subaccount: owner.subaccount.clone(),
+                        expires_at: a.expires_at,
+                        memo: None,
+                        created_at_time: Some(a.created_at),
+                    })
+                    .collect()
+            })
+            .unwrap_or_default()
+    })
+}
+
+#[ic_cdk_macros::update]
+fn icrc37_transfer_from(args: Vec<TransferFromArg>) -> Vec<Option<TransferFromResult>> {
+    let caller = ic_cdk::caller();
+    let now = ic_cdk::api::time();
+    args.into_iter()
+        .map(|arg| {
+            let token_id = match nat_to_u64(&arg.token_id) {
+                Some(id) => id,
+                None => return Some(TransferFromResult::Err(TransferFromError::NonExistingTokenId)),
+            };
+            if arg.to.owner == Principal::anonymous() {
+                return Some(TransferFromResult::Err(TransferFromError::InvalidRecipient));
+            }
+            let spender = Account { owner: caller, subaccount: arg.spender_subaccount.clone() };
+            let result = TOKENS.with(|t| {
+                let mut tokens = t.borrow_mut();
+                let mut rec = match tokens.get(&token_id) {
+                    Some(r) => r,
+                    None => return Err(TransferFromError::NonExistingTokenId),
+                };
+                let current = Account { owner: rec.owner, subaccount: rec.owner_subaccount.clone() };
+                if current.owner != arg.from.owner || current.subaccount != arg.from.subaccount {
+                    return Err(TransferFromError::Unauthorized);
+                }
+                if !is_spender_approved(token_id, &current, &spender, now) {
+                    return Err(TransferFromError::Unauthorized);
+                }
+                rec.owner = arg.to.owner;
+                rec.owner_subaccount = arg.to.subaccount.clone();
+                tokens.insert(token_id, rec);
+                Ok(())
+            });
+            match result {
+                Ok(()) => {
+                    clear_token_approvals(token_id);
+                    Some(TransferFromResult::Ok(Nat::from(next_tx())))
+                }
+                Err(e) => Some(TransferFromResult::Err(e)),
+            }
+        })
+        .collect()
 }
 
 // ─────────────────────────── HTTP image serving ───────────────────────────

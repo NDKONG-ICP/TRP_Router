@@ -39,6 +39,65 @@ type TransferResult = variant {
   Err : TransferError;
 };
 
+// ----- ICRC-37 (approvals / transfer_from) -----
+type ApprovalInfo = record {
+  spender : Account;
+  from_subaccount : opt blob;
+  expires_at : opt nat64;
+  memo : opt blob;
+  created_at_time : opt nat64;
+};
+type ApproveTokenArg = record { token_id : nat; approval_info : ApprovalInfo };
+type ApproveTokenError = variant {
+  InvalidSpender; Unauthorized; NonExistingTokenId; TooOld;
+  CreatedInFuture : record { ledger_time : nat64 };
+  GenericError : record { error_code : nat; message : text };
+  GenericBatchError : record { error_code : nat; message : text };
+};
+type ApproveTokenResult = variant { Ok : nat; Err : ApproveTokenError };
+type ApproveCollectionArg = record { approval_info : ApprovalInfo };
+type ApproveCollectionError = variant {
+  InvalidSpender; TooOld; CreatedInFuture : record { ledger_time : nat64 };
+  GenericError : record { error_code : nat; message : text };
+  GenericBatchError : record { error_code : nat; message : text };
+};
+type ApproveCollectionResult = variant { Ok : nat; Err : ApproveCollectionError };
+type RevokeTokenApprovalArg = record {
+  token_id : nat; from_subaccount : opt blob; spender : opt Account;
+  memo : opt blob; created_at_time : opt nat64;
+};
+type RevokeTokenApprovalError = variant {
+  ApprovalDoesNotExist; Unauthorized; NonExistingTokenId; TooOld;
+  CreatedInFuture : record { ledger_time : nat64 };
+  GenericError : record { error_code : nat; message : text };
+  GenericBatchError : record { error_code : nat; message : text };
+};
+type RevokeTokenApprovalResult = variant { Ok : nat; Err : RevokeTokenApprovalError };
+type RevokeCollectionApprovalArg = record {
+  from_subaccount : opt blob; spender : opt Account;
+  memo : opt blob; created_at_time : opt nat64;
+};
+type RevokeCollectionApprovalError = variant {
+  ApprovalDoesNotExist; TooOld; CreatedInFuture : record { ledger_time : nat64 };
+  GenericError : record { error_code : nat; message : text };
+  GenericBatchError : record { error_code : nat; message : text };
+};
+type RevokeCollectionApprovalResult = variant { Ok : nat; Err : RevokeCollectionApprovalError };
+type IsApprovedArg = record { spender : Account; from_subaccount : opt blob; token_id : nat };
+type TokenApproval = record { token_id : nat; approval_info : ApprovalInfo };
+type TransferFromArg = record {
+  spender_subaccount : opt blob; from : Account; to : Account;
+  token_id : nat; memo : opt blob; created_at_time : opt nat64;
+};
+type TransferFromError = variant {
+  InvalidRecipient; Unauthorized; NonExistingTokenId; TooOld;
+  CreatedInFuture : record { ledger_time : nat64 };
+  Duplicate : record { duplicate_of : nat };
+  GenericError : record { error_code : nat; message : text };
+  GenericBatchError : record { error_code : nat; message : text };
+};
+type TransferFromResult = variant { Ok : nat; Err : TransferFromError };
+
 type SupportedStandard = record { name : text; url : text };
 
 type MintRequest = record {
@@ -97,6 +156,18 @@ service : {
 
   // ── ICRC-7 transfer ──
   icrc7_transfer : (vec TransferArg) -> (vec opt TransferResult);
+
+  // ── ICRC-37 approvals / transfer_from ──
+  icrc37_max_approvals_per_token_or_collection : () -> (opt nat) query;
+  icrc37_max_revoke_approvals : () -> (opt nat) query;
+  icrc37_approve_tokens : (vec ApproveTokenArg) -> (vec opt ApproveTokenResult);
+  icrc37_approve_collection : (vec ApproveCollectionArg) -> (vec opt ApproveCollectionResult);
+  icrc37_revoke_token_approvals : (vec RevokeTokenApprovalArg) -> (vec opt RevokeTokenApprovalResult);
+  icrc37_revoke_collection_approvals : (vec RevokeCollectionApprovalArg) -> (vec opt RevokeCollectionApprovalResult);
+  icrc37_is_approved : (vec IsApprovedArg) -> (vec bool) query;
+  icrc37_get_token_approvals : (nat, opt TokenApproval, opt nat) -> (vec TokenApproval) query;
+  icrc37_get_collection_approvals : (Account, opt ApprovalInfo, opt nat) -> (vec ApprovalInfo) query;
+  icrc37_transfer_from : (vec TransferFromArg) -> (vec opt TransferFromResult);
 
   // ── HTTP image serving ──
   http_request : (HttpRequest) -> (HttpResponse) query;
