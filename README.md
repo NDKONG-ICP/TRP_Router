@@ -30,11 +30,18 @@ Raven Diffusion is, to our knowledge, the first image-generation diffusion model
 It speaks the OpenAI Images API. **POST must use the `raw.icp0.io` host** (CORS/headers).
 
 ```bash
-curl -X POST https://5723t-oaaaa-aaaao-bbquq-cai.raw.icp0.io/v1/images/generations \
+# Async HTTP (recommended): POST → 202 job id, then poll GET /v1/images/result/{id}
+JOB=$(curl -sS -X POST https://5723t-oaaaa-aaaao-bbquq-cai.raw.icp0.io/v1/images/generations \
   -H "Content-Type: application/json" \
   -H "x-oc-api-key: <PLAYGROUND_API_KEY>" \
-  -d '{"model":"raven-diffusion","prompt":"a raven over a neon city","seed":4242}'
+  -d '{"model":"raven-diffusion","prompt":"a raven over a neon city","seed":4242}' | jq -r .id)
+until curl -sS "https://5723t-oaaaa-aaaao-bbquq-cai.raw.icp0.io/v1/images/result/$JOB" \
+  -H "x-oc-api-key: <PLAYGROUND_API_KEY>" | jq -e '.status=="done"'; do sleep 3; done
 ```
+
+**IC-native (no HTTP timeout):** call update `playground_image_generate(auth_token, prompt, seed)` on the router canister (see Playground `playground.js`).
+
+Enablement (relay, catalog gating): [`docs/ROUTER-ENABLEMENT.md`](docs/ROUTER-ENABLEMENT.md).
 
 ```python
 from openai import OpenAI

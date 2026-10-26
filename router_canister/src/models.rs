@@ -129,3 +129,10 @@ pub fn relay_target(trp_id: &str) -> Option<(String, String)> {
     }
     None
 }
+
+pub fn map_onchain_chat(model: &str) -> Option<&'static str> {
+    match model {
+        "trp/onchain-qwen-0.5b" | "trp/onchain-raven-chat" => Some("qwen25"),
+        _ => None,
+    }
+}

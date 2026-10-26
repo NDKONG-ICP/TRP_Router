@@ -6,7 +6,12 @@ mod image_quota;
 mod mem;
 mod meter_client;
 mod mcp;
+mod api_keys;
+mod image_jobs;
+mod model_availability;
 mod models;
+mod rate_limit;
+mod trp_perks;
 mod moderation;
 mod onchain;
 mod pathc_client;
@@ -108,6 +113,26 @@ fn relay_config() -> Option<relay_client::RelayConfig> {
     })
 }
 
+fn runtime_flags() -> model_availability::RuntimeFlags {
+    model_availability::RuntimeFlags {
+        relay_configured: relay_config().is_some(),
+        blob_store_configured: BLOB_STORE.with(|b| b.borrow().is_some()),
+        llama_qwen_configured: LLAMA_QWEN25.with(|l| l.borrow().is_some()),
+    }
+}
+
+fn gate_model_or_response(model_id: &str) -> Result<(), HttpResponse> {
+    if let Some(msg) = model_availability::gate_message(model_id, &runtime_flags()) {
+        let body = format!(
+            r#"{{"error":{},"code":"model_not_enabled","model":{}}}"#,
+            serde_json::json!(msg),
+            serde_json::json!(model_id)
+        );
+        return Err(json_response(501, &body));
+    }
+    Ok(())
+}
+
 fn public_blob_url(blob_id: &str) -> String {
     let store = BLOB_STORE.with(|b| b.borrow().clone());
     if let Some(bs) = store {
@@ -198,12 +223,18 @@ fn is_post_upgrade_path(path: &str) -> bool {
     )
 }
 
+fn is_get_upgrade_path(path: &str) -> bool {
+    path.starts_with("/v1/images/result/")
+}
+
 #[derive(SerdeDeserialize)]
 struct ImageGenBody {
     prompt: String,
     model: Option<String>,
     size: Option<String>,
     seed: Option<u64>,
+    #[serde(default)]
+    r#async: Option<bool>,
 }
 
 #[derive(SerdeDeserialize)]
@@ -260,6 +291,66 @@ fn clear_trp_meter() {
 #[update]
 fn register_playground_api_key(key: String) {
     playground_auth::register_api_key(key);
+}
+
+#[derive(CandidType, Deserialize, Clone, Debug)]
+pub struct ApiKeyInfo {
+    pub label: String,
+    pub key_prefix: String,
+    pub active: bool,
+    pub created_ns: u64,
+}
+
+/// Controller: mint a dedicated integrator key (plaintext returned once).
+#[update]
+fn admin_create_api_key(label: String) -> String {
+    assert_controller();
+    let key = api_keys::generate_key_material();
+    api_keys::insert_key(&key, label, time());
+    key
+}
+
+#[update]
+fn admin_revoke_api_key(key: String) -> bool {
+    assert_controller();
+    api_keys::revoke_key(key.trim())
+}
+
+#[query]
+fn admin_list_api_keys() -> Vec<ApiKeyInfo> {
+    assert_controller();
+    api_keys::list_keys()
+        .into_iter()
+        .map(|k| ApiKeyInfo {
+            label: k.label,
+            key_prefix: k.key_prefix,
+            active: k.active,
+            created_ns: k.created_ns,
+        })
+        .collect()
+}
+
+#[update]
+fn set_trp_ledger(ledger: Option<Principal>, bonus_daily: u32, min_hold_e8s: u64) {
+    assert_controller();
+    trp_perks::set_trp_ledger(ledger, bonus_daily, min_hold_e8s);
+}
+
+#[query]
+fn get_trp_ledger() -> Option<Principal> {
+    trp_perks::get_trp_ledger()
+}
+
+async fn enforce_http_limits(headers: &[HeaderField]) -> Result<Principal, HttpResponse> {
+    let actor = playground_auth::resolve_actor(headers)?;
+    let now = time();
+    if let Err(e) = rate_limit::check_and_bump(actor, now) {
+        return Err(json_response(
+            429,
+            &format!(r#"{{"error":{},"code":"rate_limit_exceeded"}}"#, serde_json::json!(e)),
+        ));
+    }
+    Ok(actor)
 }
 
 #[update]
@@ -517,17 +608,35 @@ async fn playground_image_generate(auth_token: String, prompt: String, seed: u64
         model: Some("raven-diffusion".to_string()),
         size: None,
         seed: Some(seed),
+        r#async: None,
     };
     let resp = handle_raven_diffusion(&headers, &parsed).await;
     String::from_utf8_lossy(&resp.body).into_owned()
 }
 
 async fn handle_images_generations(body: &[u8], headers: &[HeaderField]) -> HttpResponse {
+    if let Err(resp) = enforce_http_limits(headers).await {
+        return resp;
+    }
     let parsed: ImageGenBody = match serde_json::from_slice(body) {
         Ok(v) => v,
         Err(e) => return json_response(400, &format!(r#"{{"error":"invalid json: {e}"}}"#)),
     };
+    if let Err(e) = rate_limit::check_prompt_len(&parsed.prompt) {
+        return json_response(400, &format!(r#"{{"error":"{e}"}}"#));
+    }
+    let model_id = parsed
+        .model
+        .as_deref()
+        .unwrap_or("trp/image-standard");
+    if let Err(resp) = gate_model_or_response(model_id) {
+        return resp;
+    }
     if is_raven_diffusion_model(parsed.model.as_deref()) {
+        let want_async = parsed.r#async != Some(false);
+        if want_async {
+            return handle_raven_diffusion_async_job(headers, &parsed).await;
+        }
         return handle_raven_diffusion(headers, &parsed).await;
     }
     if parsed.model.as_deref() == Some("trp/onchain-raven-art") {
@@ -556,10 +665,65 @@ async fn handle_images_generations(body: &[u8], headers: &[HeaderField]) -> Http
     store_image_blob(bytes, &provider).await
 }
 
+async fn handle_raven_diffusion_async_job(
+    headers: &[HeaderField],
+    parsed: &ImageGenBody,
+) -> HttpResponse {
+    let actor_detail = match playground_auth::resolve_actor_detail(headers) {
+        Ok(d) => d,
+        Err(resp) => return resp,
+    };
+    let actor = actor_detail.principal;
+    let daily_max = image_quota::daily_max_for(actor_detail.kind);
+    if let Err(e) = moderation::check_prompt_policy(&parsed.prompt) {
+        return json_response(400, &format!(r#"{{"error":"{e}"}}"#));
+    }
+    let meter = TRP_METER.with(|m| m.borrow().clone());
+    if meter.is_some() {
+        let m = meter.unwrap();
+        if meter_client::begin_job(m, actor, "img-64-1").await.is_err() {
+            if let Err(resp) = acquire_raven_diffusion_slot(actor, daily_max).await {
+                return resp;
+            }
+        }
+    } else if let Err(resp) = acquire_raven_diffusion_slot(actor, daily_max).await {
+        return resp;
+    }
+    let seed = parsed.seed.unwrap_or(4242);
+    let now = time();
+    let actor_key = actor.to_text();
+    if let Some(cached) = diffusion_cache::get(&actor_key, &parsed.prompt, seed, now) {
+        return json_response(200, &cached);
+    }
+    let diffusion = DIFFUSION_CANISTER.with(|d| {
+        d.borrow()
+            .clone()
+            .unwrap_or_else(pathc_client::default_diffusion_principal)
+    });
+    let job_id = image_jobs::create_job(actor, parsed.prompt.clone(), seed, diffusion, now);
+    let body = image_jobs::queued_response(&job_id);
+    json_response(202, &body)
+}
+
+async fn handle_image_job_result(job_id: &str, headers: &[HeaderField]) -> HttpResponse {
+    let actor = match enforce_http_limits(headers).await {
+        Ok(p) => p,
+        Err(resp) => return resp,
+    };
+    let now = time();
+    match image_jobs::advance_job_async(job_id, actor, now).await {
+        Ok(body) => json_response(200, &body),
+        Err(e) => json_response(404, &format!(r#"{{"error":{}}}"#, serde_json::json!(e))),
+    }
+}
+
 async fn store_image_blob(bytes: Vec<u8>, provider: &str) -> HttpResponse {
     let blob_store = BLOB_STORE.with(|b| b.borrow().clone());
     let Some(blob_store) = blob_store else {
-        return json_response(500, r#"{"error":"blob_store not configured"}"#.into());
+        return json_response(
+            501,
+            r#"{"error":"Off-chain image storage is not enabled on this router deployment yet.","code":"model_not_enabled"}"#,
+        );
     };
     let blob_id = match blob_client::store_image(blob_store, bytes).await {
         Ok(id) => id,
@@ -595,8 +759,10 @@ async fn handle_mcp(body: &[u8]) -> HttpResponse {
             let args = params.get("arguments").cloned().unwrap_or_default();
             match name {
                 "list_models" => {
-                    let models: serde_json::Value =
-                        serde_json::from_str(&models::models_json()).unwrap_or(serde_json::json!({}));
+                    let models: serde_json::Value = serde_json::from_str(
+                        &model_availability::models_json_filtered(&runtime_flags()),
+                    )
+                    .unwrap_or(serde_json::json!({}));
                     json_response(200, &mcp::ok_response(id, models))
                 }
                 "chat" => {
@@ -605,7 +771,11 @@ async fn handle_mcp(body: &[u8]) -> HttpResponse {
                         "stream": args.get("stream").and_then(|v| v.as_bool()).unwrap_or(false),
                         "messages": args.get("messages").cloned().unwrap_or_default(),
                     });
-                    let inner = handle_chat(serde_json::to_vec(&payload).unwrap_or_default().as_slice()).await;
+                    let inner = handle_chat(
+                        serde_json::to_vec(&payload).unwrap_or_default().as_slice(),
+                        &[],
+                    )
+                    .await;
                     if inner.status_code != 200 {
                         return inner;
                     }
@@ -645,11 +815,31 @@ async fn handle_mcp(body: &[u8]) -> HttpResponse {
     }
 }
 
-async fn handle_chat(body: &[u8]) -> HttpResponse {
+async fn handle_chat(body: &[u8], headers: &[HeaderField]) -> HttpResponse {
     let parsed: ChatBody = match serde_json::from_slice(body) {
         Ok(v) => v,
         Err(e) => return json_response(400, &format!(r#"{{"error":"{e}"}}"#)),
     };
+    if let Err(resp) = enforce_http_limits(headers).await {
+        return resp;
+    }
+    for m in &parsed.messages {
+        if let Err(e) = rate_limit::check_prompt_len(&m.content) {
+            return json_response(400, &format!(r#"{{"error":"{e}"}}"#));
+        }
+    }
+    if let Err(resp) = gate_model_or_response(&parsed.model) {
+        return resp;
+    }
+    if models::anthropic_model_id(&parsed.model).is_some() {
+        let keys = chat_keys_for_caller();
+        if keys.anthropic.is_none() {
+            return json_response(
+                402,
+                r#"{"error":"Anthropic BYOK or platform key required for this model.","code":"byok_required"}"#,
+            );
+        }
+    }
     if parsed.model.starts_with("trp/onchain-") {
         if onchain::map_model(&parsed.model).is_none() {
             return json_response(
@@ -703,7 +893,13 @@ async fn handle_chat(body: &[u8]) -> HttpResponse {
             json_chat_response(&parsed.model, &text, false, None)
         }
         Err(e) => {
-            let code = if e.contains("BYOK required") { 402 } else { 502 };
+            let code = if e.contains("BYOK required") {
+                402
+            } else if e.contains("not enabled on this router") {
+                501
+            } else {
+                502
+            };
             json_response(code, &format!(r#"{{"error":{}}}"#, serde_json::json!(e)))
         }
     }
@@ -762,7 +958,7 @@ fn sse_chat_response(model: &str, content: &str, update_calls: u32, on_chain: bo
 }
 
 fn handle_models() -> HttpResponse {
-    json_response(200, &models::models_json())
+    json_response(200, &model_availability::models_json_filtered(&runtime_flags()))
 }
 
 fn handle_status() -> HttpResponse {
@@ -792,6 +988,13 @@ async fn http_request_update(req: HttpRequest) -> HttpResponse {
         return cors_preflight();
     }
     let path = normalize_path(&req.url);
+    if req.method.eq_ignore_ascii_case("GET") && path.starts_with("/v1/images/result/") {
+        let job_id = path.trim_start_matches("/v1/images/result/").trim_start_matches('/');
+        if job_id.is_empty() {
+            return json_response(400, r#"{"error":"missing job id"}"#);
+        }
+        return handle_image_job_result(job_id, &req.headers).await;
+    }
     if req.method.eq_ignore_ascii_case("POST") {
         match path.as_str() {
             "/v1/images/generations" => {
@@ -803,7 +1006,7 @@ async fn http_request_update(req: HttpRequest) -> HttpResponse {
                     r#"{"error":"edits: use Gemini path via worker or add multipart parser (M2 follow-up)"}"#,
                 )
             }
-            "/v1/chat/completions" => return handle_chat(&req.body).await,
+            "/v1/chat/completions" => return handle_chat(&req.body, &req.headers).await,
             "/mcp" => return handle_mcp(&req.body).await,
             _ => {}
         }
@@ -815,6 +1018,9 @@ async fn http_request_update(req: HttpRequest) -> HttpResponse {
 fn http_request(req: HttpRequest) -> HttpResponse {
     let path = normalize_path(&req.url);
     if req.method.eq_ignore_ascii_case("POST") && is_post_upgrade_path(&path) {
+        return http_upgrade();
+    }
+    if req.method.eq_ignore_ascii_case("GET") && is_get_upgrade_path(&path) {
         return http_upgrade();
     }
     if req.method.eq_ignore_ascii_case("OPTIONS") {

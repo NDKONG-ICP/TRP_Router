@@ -51,11 +51,18 @@ OpenAI shape (`created`, `data[]`) plus TRP trust fields on each item.
 }
 ```
 
-## Async variant (if the router returns a job instead of holding the ~20–40s request)
-Pick ONE mode and document which the router implements:
-- **Sync (BETA default):** hold the connection, return `200` with the image. Simpler for the frontend.
-- **Job:** `POST` returns `202 { "id": "img_…", "status": "running" }`; client polls
-  `GET /v1/images/{id}` → `{ "id", "status": "running"|"succeeded"|"failed", "data"?: [...] }` (same `data[]` shape).
+## Async HTTP (default for `raven-diffusion`)
+
+The IC HTTP gateway times out near **~60s**. Full on-chain load+generate often exceeds that, so **HTTP uses async jobs by default**.
+
+1. **`POST /v1/images/generations`** → **202**  
+   `{ "id": "<job>", "object": "image.generation.job", "status": "queued" }`  
+   Pass `"async": false` only if you accept sync risk (Playground uses the IC-native update `playground_image_generate` instead).
+
+2. **`GET /v1/images/result/{id}`** (same `Authorization` / `x-oc-api-key`) →  
+   `{ "id", "object": "image.generation.result", "status": "queued"|"running"|"done"|"error", "result"?: { …OpenAI image body… } }`
+
+See [`ROUTER-ENABLEMENT.md`](ROUTER-ENABLEMENT.md) for curl examples and [`relay/DEPLOY.md`](../relay/DEPLOY.md) for off-chain chat.
 
 ## Errors (OpenAI error envelope)
 ```json

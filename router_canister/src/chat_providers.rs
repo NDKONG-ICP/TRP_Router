@@ -22,9 +22,9 @@ pub async fn complete(
     if !models::relay_target(model).is_some() {
         return Err(format!("unknown or unsupported chat model: {model}"));
     }
-    let relay = relay.ok_or(
-        "off-chain chat requires relay (set RELAY_URL + RELAY_SHARED_SECRET in vault)",
-    )?;
+    let relay = relay.ok_or_else(|| {
+        "Off-chain chat is not enabled on this router deployment yet.".to_string()
+    })?;
     let byok = anthropic_byok(model, keys);
     relay_client::infer_via_relay(model, messages, req_seq, &relay, byok).await
 }

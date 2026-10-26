@@ -300,9 +300,34 @@ dfx canister info 7chv3-5iaaa-aaaao-bbq3a-cai --network ic
   </div>
 </div></section>
 
+<!-- ROADMAP -->
+<section id="roadmap" class="gut"><div class="wrap">
+  <span class="eyebrow">07 — Roadmap</span>
+  <h2>Where we are &amp; what’s next</h2>
+  <p class="lead">Beta limits are deliberate: the breakthrough is <strong>fully on-chain, verifiable inference</strong> — not competing on resolution with off-chain GPUs yet.</p>
+  <div class="grid2">
+    <div class="feat hl">
+      <h4>Now (beta)</h4>
+      <p><strong>Raven Diffusion</strong> at 64×64, single denoise step, deterministic PNG + SHA-256 trust fields. On-chain chat via Qwen 0.5B. OpenAI-compatible HTTP on <code>raw.icp0.io</code>; Playground uses IC-native calls where HTTP would time out.</p>
+    </div>
+    <div class="feat">
+      <h4>Near-term engineering</h4>
+      <p>Higher resolution and multi-step denoise on-chain (resumable <code>step()</code> engine). Async image jobs + honest <code>/v1/models</code> catalog. Off-chain chat/images via owner-deployed relay and blob storage when enabled.</p>
+    </div>
+    <div class="feat">
+      <h4>Platform hardening</h4>
+      <p>Per-integrator API keys, rate limits, and $TRP utility hooks (ledger-gated until token launch) — staking perks and fee rebates described in product docs, utility-only.</p>
+    </div>
+    <div class="feat">
+      <h4>Integrators</h4>
+      <p>See <a href="https://github.com/NDKONG-ICP/TRP_Router/blob/main/docs/ROUTER-ENABLEMENT.md">ROUTER-ENABLEMENT.md</a> for relay setup, async image polling, and what each deployment advertises.</p>
+    </div>
+  </div>
+</div></section>
+
 <!-- RESOURCES -->
 <section id="resources" class="gut"><div class="wrap">
-  <span class="eyebrow">07 — Resources</span>
+  <span class="eyebrow">08 — Resources</span>
   <h2>Canisters &amp; links</h2>
   <dl class="kv" style="font-size:14px">
     <dt>Playground</dt><dd><a href="https://6pjrv-saaaa-aaaao-bbq4q-cai.icp0.io" target="_blank" rel="noopener">6pjrv-saaaa-aaaao-bbq4q-cai.icp0.io</a></dd>

@@ -33,12 +33,12 @@ enum BeginResult {
 }
 
 #[derive(CandidType, Deserialize)]
-struct StepOk {
+pub struct StepOk {
     step_index: u32,
     instructions: u64,
     wall_ms: u64,
-    load_done: bool,
-    generate_done: bool,
+    pub load_done: bool,
+    pub generate_done: bool,
     tensors_this_call: u32,
     tensors_loaded_total: u32,
     tensors_total: u32,
@@ -86,11 +86,7 @@ pub fn default_diffusion_principal() -> Principal {
     Principal::from_text(DEFAULT_DIFFUSION).expect("valid diffusion canister id")
 }
 
-pub async fn generate_raven_diffusion(
-    diffusion: Principal,
-    prompt: &str,
-    seed: u64,
-) -> Result<DiffusionImage, String> {
+pub async fn diffusion_begin(diffusion: Principal, prompt: &str, seed: u64) -> Result<(), String> {
     let args = BeginArgs {
         prompt: prompt.to_string(),
         seed,
@@ -103,55 +99,39 @@ pub async fn generate_raven_diffusion(
         .await
         .map_err(|e| format!("begin call: {e:?}"))?;
     match begin_res {
-        BeginResult::Ok(_session) => {}
-        BeginResult::Err(e) => return Err(e),
+        BeginResult::Ok(_session) => Ok(()),
+        BeginResult::Err(e) => Err(e),
     }
+}
 
-    let mut load_calls = 0u32;
-    loop {
-        load_calls += 1;
-        if load_calls > MAX_LOAD_STEPS {
-            return Err(format!("load exceeded {MAX_LOAD_STEPS} step(0) calls"));
-        }
-        let (st,): (StepResult,) = ic_cdk::call(diffusion, "step", (0u32,))
-            .await
-            .map_err(|e| format!("step(0) call: {e:?}"))?;
-        match st {
-            StepResult::Ok(ok) => {
-                if ok.load_done {
-                    break;
-                }
-            }
-            StepResult::Err(e) => return Err(e),
-        }
+pub async fn diffusion_step_load(diffusion: Principal) -> Result<StepOk, String> {
+    let (st,): (StepResult,) = ic_cdk::call(diffusion, "step", (0u32,))
+        .await
+        .map_err(|e| format!("step(0) call: {e:?}"))?;
+    match st {
+        StepResult::Ok(ok) => Ok(ok),
+        StepResult::Err(e) => Err(e),
     }
+}
 
-    let mut gen_calls = 0u32;
-    loop {
-        gen_calls += 1;
-        if gen_calls > MAX_GEN_STEPS {
-            return Err(format!("generate exceeded {MAX_GEN_STEPS} step(1) calls"));
-        }
-        let (st,): (StepResult,) = ic_cdk::call(diffusion, "step", (1u32,))
-            .await
-            .map_err(|e| format!("step(1) call: {e:?}"))?;
-        match st {
-            StepResult::Ok(ok) => {
-                if ok.generate_done {
-                    break;
-                }
-            }
-            StepResult::Err(e) => return Err(e),
-        }
+pub async fn diffusion_step_gen(diffusion: Principal) -> Result<StepOk, String> {
+    let (st,): (StepResult,) = ic_cdk::call(diffusion, "step", (1u32,))
+        .await
+        .map_err(|e| format!("step(1) call: {e:?}"))?;
+    match st {
+        StepResult::Ok(ok) => Ok(ok),
+        StepResult::Err(e) => Err(e),
     }
+}
 
+pub async fn diffusion_finish_png(diffusion: Principal) -> Result<DiffusionImage, String> {
     let (fin,): (FinishResult,) = ic_cdk::call(diffusion, "finish", ())
         .await
         .map_err(|e| format!("finish call: {e:?}"))?;
-    let sha256_hex = match fin {
-        FinishResult::Ok(ok) => ok.png_sha256,
+    match fin {
         FinishResult::Err(e) => return Err(e),
-    };
+        FinishResult::Ok(_) => {}
+    }
 
     let (png_res,): (PngResult,) = ic_cdk::call(diffusion, "get_png", ())
         .await
@@ -162,16 +142,43 @@ pub async fn generate_raven_diffusion(
     };
 
     let computed = hex::encode(Sha256::digest(&png));
-    let finish_norm = sha256_hex
-        .trim()
-        .trim_start_matches("0x")
-        .to_ascii_lowercase();
-    // Trust PNG bytes; finish metadata may differ in casing or formatting.
-    let _ = finish_norm;
-
     Ok(DiffusionImage {
         png,
         sha256_hex: computed,
         canister: diffusion,
     })
+}
+
+pub async fn generate_raven_diffusion(
+    diffusion: Principal,
+    prompt: &str,
+    seed: u64,
+) -> Result<DiffusionImage, String> {
+    diffusion_begin(diffusion, prompt, seed).await?;
+
+    let mut load_calls = 0u32;
+    loop {
+        load_calls += 1;
+        if load_calls > MAX_LOAD_STEPS {
+            return Err(format!("load exceeded {MAX_LOAD_STEPS} step(0) calls"));
+        }
+        let ok = diffusion_step_load(diffusion).await?;
+        if ok.load_done {
+            break;
+        }
+    }
+
+    let mut gen_calls = 0u32;
+    loop {
+        gen_calls += 1;
+        if gen_calls > MAX_GEN_STEPS {
+            return Err(format!("generate exceeded {MAX_GEN_STEPS} step(1) calls"));
+        }
+        let ok = diffusion_step_gen(diffusion).await?;
+        if ok.generate_done {
+            break;
+        }
+    }
+
+    diffusion_finish_png(diffusion).await
 }
