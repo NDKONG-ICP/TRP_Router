@@ -97,6 +97,45 @@
     });
   }
 
+  // Block screen shown when someone declines / indicates under 13 on first visit.
+  function showUnderageBlock() {
+    if (document.querySelector(".trp-age-block")) return;
+    const block = document.createElement("div");
+    block.className = "trp-age-overlay trp-age-block";
+    block.setAttribute("role", "presentation");
+    block.innerHTML =
+      '<div class="trp-age-dialog" role="dialog" aria-modal="true" aria-labelledby="trpAgeBlockTitle">' +
+      '<h2 id="trpAgeBlockTitle">Come back when you’re 13</h2>' +
+      "<p>You must be <strong>13 or older</strong> to use The Raven Project.</p>" +
+      '<div class="trp-age-actions">' +
+      '<button type="button" class="btn primary mini" id="trpAgeRetry">I am 13 or older</button>' +
+      "</div></div>";
+    document.body.appendChild(block);
+    document.body.classList.add("trp-age-open");
+    const retry = block.querySelector("#trpAgeRetry");
+    retry.addEventListener("click", function () {
+      persistAgeConfirmed();
+      document.body.classList.remove("trp-age-open");
+      block.remove();
+    });
+    retry.focus();
+  }
+
+  // First-visit gate: prompt once before any use (covers anonymous generation,
+  // not just Internet Identity sign-in). One-time per device via localStorage.
+  function runFirstVisitGate() {
+    if (isAgeConfirmed()) return;
+    ensureAgeConfirmed().then(function (ok) {
+      if (!ok) showUnderageBlock();
+    });
+  }
+
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", runFirstVisitGate);
+  } else {
+    runFirstVisitGate();
+  }
+
   window.TRP_AGE = {
     isAgeConfirmed,
     ensureAgeConfirmed,
