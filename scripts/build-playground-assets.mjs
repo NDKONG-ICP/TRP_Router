@@ -8,6 +8,8 @@ const out = join(root, "dist", "playground");
 mkdirSync(out, { recursive: true });
 const buildId = String(Math.floor(Date.now() / 1000));
 for (const f of [
+  "age-gate.js",
+  "privacy-notice.js",
   "trp-core.js",
   "playground.js",
   "chat-panel.js",
@@ -19,13 +21,17 @@ for (const f of [
 ]) {
   cpSync(join(root, "ui-mockup", f), join(out, f));
 }
+for (const f of ["privacy.html", "terms.html", "dmca.html", "legal.css"]) {
+  const p = join(root, "ui-mockup", f);
+  if (existsSync(p)) cpSync(p, join(out, f));
+}
 let html = readFileSync(join(root, "ui-mockup", "index.html"), "utf8");
 html = html.replace(
   /<meta name="viewport"/,
   `<meta name="trp-playground-build" content="${buildId}">\n<meta name="viewport"`,
 );
 html = html.replace(
-  /(<script src=")(config\.js|trp-core\.js|ui-shell\.js|generation-stats\.js|playground\.js|chat-panel\.js|models-catalog\.js|wallet-page\.js|admin-panel\.js)("><\/script>)/g,
+  /(<script src=")(config\.js|age-gate\.js|privacy-notice\.js|trp-core\.js|ui-shell\.js|generation-stats\.js|playground\.js|chat-panel\.js|models-catalog\.js|wallet-page\.js|admin-panel\.js)("><\/script>)/g,
   `$1$2?v=${buildId}$3`,
 );
 writeFileSync(join(out, "index.html"), html);

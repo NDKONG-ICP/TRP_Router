@@ -1,4 +1,6 @@
 (function () {
+  /* If recurring billing is ever added, California Automatic Renewal Law disclosures must appear next to the purchase button. */
+  /* If commercial email is ever collected, CAN-SPAM requires an unsubscribe link and a postal address — revisit then. */
   const ICP_LEDGER = "ryjl3-tyaaa-aaaaa-aaaba-cai";
   const AGENT_VER = "2.4.1";
   const agentUrl =
@@ -989,8 +991,13 @@
   }
 
   document.getElementById("walletSignIn")?.addEventListener("click", async () => {
-    await window.TRP.ensureII();
-    refreshAll();
+    try {
+      await window.TRP.ensureII();
+      refreshAll();
+    } catch (e) {
+      const msg = String(e.message || e);
+      if (prEl) prEl.textContent = msg;
+    }
   });
   document.getElementById("walletRefresh")?.addEventListener("click", refreshAll);
   document.getElementById("walletSendBtn")?.addEventListener("click", sendToken);

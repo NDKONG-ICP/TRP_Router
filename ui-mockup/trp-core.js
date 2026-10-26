@@ -55,6 +55,14 @@
     if (authIdentity && iiPrincipal) {
       return { authClient, authIdentity, principal: iiPrincipal };
     }
+    if (window.TRP_AGE && window.TRP_AGE.ensureAgeConfirmed) {
+      const ageOk = await window.TRP_AGE.ensureAgeConfirmed();
+      if (!ageOk) {
+        throw new Error(
+          "Sign-in cancelled. You must be 13 or older to use The Raven Project.",
+        );
+      }
+    }
     const { AuthClient } = await import(
       "https://esm.sh/@dfinity/auth-client@2.4.1?alias=@dfinity/candid:@dfinity/candid@2.4.1"
     );
