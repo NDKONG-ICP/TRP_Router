@@ -102,8 +102,9 @@ pub fn resolve_actor_detail(headers: &[HeaderField]) -> Result<ActorDetail, Http
         });
     }
     let h = hash_key(&token);
-    let accepted = ACCEPTED_API_KEY_HASHES.with(|m| m.borrow().contains_key(&KeyHash(h)));
-    if !accepted {
+    let legacy = ACCEPTED_API_KEY_HASHES.with(|m| m.borrow().contains_key(&KeyHash(h)));
+    let named = crate::api_keys::is_active_key(&token);
+    if !legacy && !named {
         return Err(unauthorized("invalid API key"));
     }
     Ok(ActorDetail {
