@@ -31,6 +31,15 @@ try {
 dfx(`canister call router_canister set_llama_qwen25 "(principal \\"${llamaId}\\")"`);
 console.log("set_llama_qwen25", llamaId);
 
+let blobId = "5y35h-dyaaa-aaaao-bbqua-cai";
+try {
+  blobId = dfx("canister id blob_store");
+} catch {
+  /* default mainnet id */
+}
+dfx(`canister call router_canister init_router "(principal \\"${blobId}\\")"`);
+console.log("init_router blob_store", blobId);
+
 let apiKey = process.env.TRP_PLAYGROUND_API_KEY;
 const cfgPath = join(root, "ui-mockup", "config.js");
 if (!apiKey && existsSync(cfgPath)) {
@@ -82,3 +91,10 @@ const body = `window.TRP_PLAYGROUND = {
 import { writeFileSync } from "fs";
 writeFileSync(cfgPath, body);
 console.log("wrote", cfgPath);
+
+// Relay + provider vault keys (off-chain chat/images) — required for full /v1/models catalog.
+execSync("node scripts/set-vault-from-env.mjs", {
+  cwd: root,
+  stdio: "inherit",
+  env: { ...process.env, DFX_NETWORK: net, DFX_IDENTITY: identity },
+});

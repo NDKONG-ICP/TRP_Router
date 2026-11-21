@@ -8,15 +8,23 @@
     return u.replace(/\/v1\/?$/, "");
   }
 
-  /** GET /v1/models is a canister query; icp0.io returns 503 — use raw.icp0.io. */
-  function routerQueryBase() {
+  /** icp0.io boundary breaks queries/CORS; config may already use raw.icp0.io — do not double-prefix. */
+  function routerHttpOrigin() {
     const host = routerPostBase();
     if (!host) return "";
+    if (/\.raw\.icp0\.io\b/i.test(host)) return host;
     return host.replace(/\.icp0\.io\b/, ".raw.icp0.io");
   }
 
-  function modelsListUrl() {
-    return routerQueryBase() + "/v1/models";
+  /** GET /v1/models is a canister query; icp0.io returns 503 — use raw.icp0.io. */
+  function routerQueryBase() {
+    return routerHttpOrigin();
+  }
+
+  function modelsListUrl(opts) {
+    const full = opts && opts.full;
+    const q = full ? "?catalog=full" : "";
+    return routerQueryBase() + "/v1/models" + q;
   }
 
   /** POST /v1/* — use raw.icp0.io (boundary on icp0.io breaks CORS preflight). */
@@ -117,6 +125,7 @@
   window.TRP = {
     cfg,
     routerPostBase,
+    routerHttpOrigin,
     routerQueryBase,
     routerPostUrl,
     modelsListUrl,

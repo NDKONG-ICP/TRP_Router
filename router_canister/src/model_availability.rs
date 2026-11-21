@@ -65,15 +65,29 @@ pub fn catalog_filtered(rt: &RuntimeFlags) -> Vec<ModelEntry> {
         .collect()
 }
 
+fn entry_json(m: &ModelEntry, enabled: bool) -> String {
+    format!(
+        r#"{{"id":"{}","object":"model","owned_by":"{}","capability":"{}","on_chain":{},"byok":{},"free_tier":{},"enabled":{}}}"#,
+        m.id, m.owned_by, m.capability, m.on_chain, m.byok, m.free_tier, enabled
+    )
+}
+
 pub fn models_json_filtered(rt: &RuntimeFlags) -> String {
     let entries = catalog_filtered(rt);
     let items: Vec<String> = entries
         .iter()
+        .map(|m| entry_json(m, true))
+        .collect();
+    format!(r#"{{"object":"list","data":[{}]}}"#, items.join(","))
+}
+
+/// Full smoke catalog; `enabled` is false when this deployment cannot serve the model yet.
+pub fn models_json_full(rt: &RuntimeFlags) -> String {
+    let items: Vec<String> = models::catalog()
+        .iter()
         .map(|m| {
-            format!(
-                r#"{{"id":"{}","object":"model","owned_by":"{}","capability":"{}","on_chain":{},"byok":{},"free_tier":{}}}"#,
-                m.id, m.owned_by, m.capability, m.on_chain, m.byok, m.free_tier
-            )
+            let enabled = gate_message(m.id, rt).is_none();
+            entry_json(m, enabled)
         })
         .collect();
     format!(r#"{{"object":"list","data":[{}]}}"#, items.join(","))

@@ -5,15 +5,19 @@ use ic_stable_structures::{StableBTreeMap, StableCell, Storable};
 use std::borrow::Cow;
 use std::cell::RefCell;
 
-/// Free tier: II-authenticated users (via `Authorization: Bearer ii:…`).
+/// Free tier per verified II principal (authenticated canister call).
 pub const RAVEN_DIFFUSION_DAILY_MAX_II: u32 = 2;
-/// Shared playground API-key bucket (legacy beta).
+/// Per API key: the shared Playground key (one bucket for everyone using it) and
+/// each admin-minted key (its own bucket).
 pub const RAVEN_DIFFUSION_DAILY_MAX_API_KEY: u32 = 50;
+/// One bucket shared by ALL unverified `ii:` claims — see `playground_auth`.
+pub const RAVEN_DIFFUSION_DAILY_MAX_UNVERIFIED_II: u32 = 50;
 
 pub fn daily_max_for(kind: ActorKind) -> u32 {
     match kind {
         ActorKind::InternetIdentity => RAVEN_DIFFUSION_DAILY_MAX_II,
-        ActorKind::ApiKeyShared => RAVEN_DIFFUSION_DAILY_MAX_API_KEY,
+        ActorKind::InternetIdentityUnverified => RAVEN_DIFFUSION_DAILY_MAX_UNVERIFIED_II,
+        ActorKind::ApiKeyShared | ActorKind::ApiKeyMinted => RAVEN_DIFFUSION_DAILY_MAX_API_KEY,
     }
 }
 

@@ -224,23 +224,35 @@
   <h2>Build on TRP Router</h2>
   <p class="lead">It speaks the OpenAI API. Point your client at the Router and pick a model by id.</p>
 
-  <h3>Generate an image (OpenAI-compatible)</h3>
+  <h3>1 · Connect</h3>
+  <p>Base URL: <code>https://5723t-oaaaa-aaaao-bbquq-cai.raw.icp0.io/v1</code>. Every chat and image call needs an API key, sent as <code>Authorization: Bearer &lt;key&gt;</code> (or <code>x-oc-api-key: &lt;key&gt;</code> from a browser). Without a key you get <code>401</code>. To request a key, email <a href="mailto:raven.icp@gmail.com">raven.icp@gmail.com</a>.</p>
+
+  <h3>2 · List the models</h3>
+  <p><code>GET /v1/models</code> needs no key and returns every model this deployment can serve, with its <code>capability</code> (<code>chat</code> or <code>image</code>). Use the <code>id</code> exactly as listed, including the <code>trp/</code> prefix — a bare upstream name such as <code>gpt-oss-20b</code> is rejected with <code>501 model_not_enabled</code>.</p>
+<pre><code>curl https://5723t-oaaaa-aaaao-bbquq-cai.raw.icp0.io/v1/models</code></pre>
+
+  <h3>3 · Chat</h3>
+  <p>Standard <code>POST /v1/chat/completions</code>. <code>"stream": true</code> is accepted. (There is no <code>/v1/responses</code> endpoint.)</p>
 <pre><code><span class="tok-k">from</span> openai <span class="tok-k">import</span> OpenAI
 
-client = OpenAI(base_url=<span class="tok-s">"https://5723t-oaaaa-aaaao-bbquq-cai.icp0.io/v1"</span>, api_key=<span class="tok-s">"&lt;key&gt;"</span>)
-img = client.images.generate(
-    model=<span class="tok-g">"raven-diffusion"</span>,          <span class="tok-c"># fully on-chain</span>
-    prompt=<span class="tok-s">"a raven over a neon city"</span>,
-    <span class="tok-c"># seed is first-class → deterministic, reproducible output</span>
-)</code></pre>
+client = OpenAI(base_url=<span class="tok-s">"https://5723t-oaaaa-aaaao-bbquq-cai.raw.icp0.io/v1"</span>, api_key=<span class="tok-s">"&lt;key&gt;"</span>)
+r = client.chat.completions.create(
+    model=<span class="tok-g">"trp/onchain-qwen-0.5b"</span>,    <span class="tok-c"># runs fully on-chain; or any chat id from /v1/models</span>
+    messages=[{<span class="tok-s">"role"</span>: <span class="tok-s">"user"</span>, <span class="tok-s">"content"</span>: <span class="tok-s">"Say hello in three words."</span>}],
+)
+<span class="tok-k">print</span>(r.choices[0].message.content)</code></pre>
 
-  <h3>Raw HTTP</h3>
+  <h3>4 · Generate an image (async job)</h3>
+  <p>On-chain diffusion takes longer than one HTTP request allows, so <code>raven-diffusion</code> returns a job to poll. The stock <code>client.images.generate()</code> helper expects an immediate image and will not work for this model — call the two endpoints directly:</p>
 <pre><code><span class="tok-k">POST</span> /v1/images/generations
-<span class="tok-c"># body:</span>
-{ <span class="tok-g">"model"</span>: <span class="tok-s">"raven-diffusion"</span>, <span class="tok-g">"prompt"</span>: <span class="tok-s">"..."</span>, <span class="tok-g">"seed"</span>: <span class="tok-s">4242</span> }
+{ <span class="tok-g">"model"</span>: <span class="tok-s">"raven-diffusion"</span>, <span class="tok-g">"prompt"</span>: <span class="tok-s">"a raven over a neon city"</span>, <span class="tok-g">"seed"</span>: <span class="tok-s">4242</span> }
+<span class="tok-c"># → 202 { "id": "&lt;job&gt;", "object": "image.generation.job", "status": "queued" }</span>
 
-<span class="tok-c"># response carries OpenAI's shape + trust fields:</span>
-<span class="tok-g">"sha256"</span>, <span class="tok-g">"canister"</span>, <span class="tok-g">"module_hash"</span>, <span class="tok-g">"deterministic": true</span></code></pre>
+<span class="tok-k">GET</span> /v1/images/result/&lt;job&gt;        <span class="tok-c"># poll every few seconds</span>
+<span class="tok-c"># → { "status": "queued | running | done | error",</span>
+<span class="tok-c">#     "result": { "data": [ { "b64_json": "…", "canister": "7chv3-…",</span>
+<span class="tok-c">#                             "sha256": "…", "deterministic": true } ] } }</span></code></pre>
+  <p>The same <code>prompt</code> and <code>seed</code> always return the same <code>sha256</code>.</p>
 
   <h3>Verify any output yourself</h3>
 <pre><code><span class="tok-c"># confirm the exact model the canister is running</span>

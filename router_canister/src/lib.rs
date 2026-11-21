@@ -252,21 +252,25 @@ struct ChatMsg {
 
 #[update]
 fn init_router(blob_store: Principal) {
+    assert_controller();
     BLOB_STORE.with(|b| *b.borrow_mut() = Some(blob_store));
 }
 
 #[update]
 fn set_llama_qwen25(llama: Principal) {
+    assert_controller();
     LLAMA_QWEN25.with(|l| *l.borrow_mut() = Some(llama));
 }
 
 #[update]
 fn set_diffusion_canister(diffusion: Principal) {
+    assert_controller();
     DIFFUSION_CANISTER.with(|d| *d.borrow_mut() = Some(diffusion));
 }
 
 #[update]
 fn set_trp_meter(meter: Principal) {
+    assert_controller();
     TRP_METER.with(|m| *m.borrow_mut() = Some(meter));
 }
 
@@ -342,19 +346,27 @@ fn get_trp_ledger() -> Option<Principal> {
 }
 
 async fn enforce_http_limits(headers: &[HeaderField]) -> Result<Principal, HttpResponse> {
-    let actor = playground_auth::resolve_actor(headers)?;
+    enforce_http_limits_detail(headers).await.map(|d| d.principal)
+}
+
+/// Authenticate + rate-limit an HTTP request, keeping how trusted the caller is.
+async fn enforce_http_limits_detail(
+    headers: &[HeaderField],
+) -> Result<playground_auth::ActorDetail, HttpResponse> {
+    let detail = playground_auth::resolve_actor_detail(headers)?;
     let now = time();
-    if let Err(e) = rate_limit::check_and_bump(actor, now) {
+    if let Err(e) = rate_limit::check_and_bump(detail.principal, now) {
         return Err(json_response(
             429,
             &format!(r#"{{"error":{},"code":"rate_limit_exceeded"}}"#, serde_json::json!(e)),
         ));
     }
-    Ok(actor)
+    Ok(detail)
 }
 
 #[update]
 fn set_http_transform(_transform: Principal) {
+    assert_controller();
     // Legacy no-op: transform is implemented on this canister as `transform` query.
 }
 
@@ -369,6 +381,7 @@ fn transform(raw: ic_cdk::api::management_canister::http_request::TransformArgs)
 
 #[update]
 fn set_provider_keys(cf_acct: Option<String>, cf_token: Option<String>, gemini: Option<String>) {
+    assert_controller();
     CF_ACCT.with(|a| *a.borrow_mut() = cf_acct);
     CF_TOKEN.with(|t| *t.borrow_mut() = cf_token);
     GEMINI_KEY.with(|g| *g.borrow_mut() = gemini);
@@ -376,6 +389,7 @@ fn set_provider_keys(cf_acct: Option<String>, cf_token: Option<String>, gemini: 
 
 #[update]
 fn set_chat_vault_keys(groq: Option<String>, openrouter: Option<String>, anthropic: Option<String>) {
+    assert_controller();
     GROQ_KEY.with(|g| *g.borrow_mut() = groq);
     OPENROUTER_KEY.with(|o| *o.borrow_mut() = openrouter);
     ANTHROPIC_VAULT.with(|a| *a.borrow_mut() = anthropic);
@@ -383,6 +397,7 @@ fn set_chat_vault_keys(groq: Option<String>, openrouter: Option<String>, anthrop
 
 #[update]
 fn set_relay_config(relay_url: Option<String>, relay_secret: Option<String>) {
+    assert_controller();
     RELAY_URL.with(|u| *u.borrow_mut() = relay_url);
     RELAY_SECRET.with(|s| *s.borrow_mut() = relay_secret);
 }
@@ -445,6 +460,7 @@ fn pay_with_mock_trp_quote(amount_e8: Nat) -> QuoteResult {
 /// Local-only payment logic exercise (oracle + quote math); does not enable production payments.
 #[update]
 fn dev_exercise_m5_oracle(trp_usd_micro: candid::Nat, amount_e8: Nat) -> QuoteResult {
+    assert_controller();
     let trp_usd_micro = u64::try_from(trp_usd_micro.0).unwrap_or(0);
     payments::refresh_oracle(trp_usd_micro);
     let amount = u128::try_from(amount_e8.0).unwrap_or(0);
@@ -456,6 +472,7 @@ fn dev_exercise_m5_oracle(trp_usd_micro: candid::Nat, amount_e8: Nat) -> QuoteRe
 
 #[update]
 fn dev_exercise_m5_stale_oracle(amount_e8: Nat) -> QuoteResult {
+    assert_controller();
     let amount = u128::try_from(amount_e8.0).unwrap_or(0);
     QuoteResult::err(
         payments::quote_mock_trp_credits(amount)
@@ -466,6 +483,7 @@ fn dev_exercise_m5_stale_oracle(amount_e8: Nat) -> QuoteResult {
 
 #[update]
 fn dev_exercise_m6_stake(amount_e8: Nat) -> Nat {
+    assert_controller();
     let p = caller();
     let amt = u128::try_from(amount_e8.0).unwrap_or(0);
     let credits = payments::stake_accrue(p, amt);
@@ -475,6 +493,7 @@ fn dev_exercise_m6_stake(amount_e8: Nat) -> Nat {
 
 #[update]
 fn dev_exercise_m6_byok(enable: bool) -> Nat {
+    assert_controller();
     payments::set_byok(caller(), enable);
     Nat::from(if payments::byok_active(caller()) {
         0u64
@@ -485,6 +504,7 @@ fn dev_exercise_m6_byok(enable: bool) -> Nat {
 
 #[update]
 fn dev_exercise_m6_holder(daily: u32) -> bool {
+    assert_controller();
     payments::register_mock_holder(caller(), daily);
     payments::consume_holder_free(caller())
 }
@@ -502,12 +522,23 @@ fn is_raven_diffusion_model(model: Option<&str>) -> bool {
 }
 
 /// Router free tier, then optional `trp_pay` credit. No meter job id.
+///
+/// Credits are only spent for a *verified* Internet Identity (authenticated canister
+/// call). An `ii:` header or a shared key proves nothing about who is asking, so
+/// letting it reach `consume_credit` would let anyone burn another user's balance.
 async fn acquire_raven_diffusion_slot(
-    actor: Principal,
+    who: &playground_auth::ActorDetail,
     daily_max: u32,
 ) -> Result<Option<u64>, HttpResponse> {
+    let actor = who.principal;
     if image_quota::consume_raven_diffusion_slot(actor, daily_max).is_ok() {
         return Ok(None);
+    }
+    if !who.kind.may_spend_credits() {
+        return Err(json_response(
+            429,
+            r#"{"error":"Free on-chain image quota for today is used up. Sign in with Internet Identity on the Playground to use paid credits.","code":"free_quota_exhausted"}"#,
+        ));
     }
     if let Some(pay) = routing_store::trp_pay_canister() {
         if let Err(e) = trp_pay_client::consume_credit(pay, actor).await {
@@ -528,13 +559,9 @@ async fn acquire_raven_diffusion_slot(
 }
 
 async fn handle_raven_diffusion(
-    headers: &[HeaderField],
+    actor_detail: playground_auth::ActorDetail,
     parsed: &ImageGenBody,
 ) -> HttpResponse {
-    let actor_detail = match playground_auth::resolve_actor_detail(headers) {
-        Ok(d) => d,
-        Err(resp) => return resp,
-    };
     let actor = actor_detail.principal;
     let daily_max = image_quota::daily_max_for(actor_detail.kind);
     if let Err(e) = moderation::check_prompt_policy(&parsed.prompt) {
@@ -545,13 +572,13 @@ async fn handle_raven_diffusion(
     let job_id = if let Some(m) = meter {
         match meter_client::begin_job(m, actor, "img-64-1").await {
             Ok(id) => Some(id),
-            Err(_) => match acquire_raven_diffusion_slot(actor, daily_max).await {
+            Err(_) => match acquire_raven_diffusion_slot(&actor_detail, daily_max).await {
                 Ok(j) => j,
                 Err(resp) => return resp,
             },
         }
     } else {
-        match acquire_raven_diffusion_slot(actor, daily_max).await {
+        match acquire_raven_diffusion_slot(&actor_detail, daily_max).await {
             Ok(j) => j,
             Err(resp) => return resp,
         }
@@ -599,10 +626,13 @@ async fn handle_raven_diffusion(
 /// Browser playground: same path as POST /v1/images/generations (raven-diffusion) without HTTP upgrade.
 #[update]
 async fn playground_image_generate(auth_token: String, prompt: String, seed: u64) -> String {
-    let headers = vec![HeaderField(
-        "x-oc-api-key".into(),
-        auth_token.trim().to_string(),
-    )];
+    // This is an authenticated canister call, so `caller()` is the one identity we can
+    // trust. An `ii:<principal>` token only counts as that user (free tier + paid
+    // credits) when it matches the caller; otherwise it lands in the shared bucket.
+    let actor_detail = match playground_auth::resolve_actor_for_call(&auth_token, caller()) {
+        Ok(d) => d,
+        Err(resp) => return String::from_utf8_lossy(&resp.body).into_owned(),
+    };
     let parsed = ImageGenBody {
         prompt,
         model: Some("raven-diffusion".to_string()),
@@ -610,19 +640,20 @@ async fn playground_image_generate(auth_token: String, prompt: String, seed: u64
         seed: Some(seed),
         r#async: None,
     };
-    let resp = handle_raven_diffusion(&headers, &parsed).await;
+    let resp = handle_raven_diffusion(actor_detail, &parsed).await;
     String::from_utf8_lossy(&resp.body).into_owned()
 }
 
 async fn handle_images_generations(body: &[u8], headers: &[HeaderField]) -> HttpResponse {
-    if let Err(resp) = enforce_http_limits(headers).await {
-        return resp;
-    }
+    let actor_detail = match enforce_http_limits_detail(headers).await {
+        Ok(d) => d,
+        Err(resp) => return resp,
+    };
     let parsed: ImageGenBody = match serde_json::from_slice(body) {
         Ok(v) => v,
         Err(e) => return json_response(400, &format!(r#"{{"error":"invalid json: {e}"}}"#)),
     };
-    if let Err(e) = rate_limit::check_prompt_len(&parsed.prompt) {
+    if let Err(e) = rate_limit::check_prompt_len(&parsed.prompt, rate_limit::MAX_PROMPT_CHARS) {
         return json_response(400, &format!(r#"{{"error":"{e}"}}"#));
     }
     let model_id = parsed
@@ -635,9 +666,9 @@ async fn handle_images_generations(body: &[u8], headers: &[HeaderField]) -> Http
     if is_raven_diffusion_model(parsed.model.as_deref()) {
         let want_async = parsed.r#async != Some(false);
         if want_async {
-            return handle_raven_diffusion_async_job(headers, &parsed).await;
+            return handle_raven_diffusion_async_job(actor_detail, &parsed).await;
         }
-        return handle_raven_diffusion(headers, &parsed).await;
+        return handle_raven_diffusion(actor_detail, &parsed).await;
     }
     if parsed.model.as_deref() == Some("trp/onchain-raven-art") {
         if let Err(e) = moderation::check_prompt(caller(), &parsed.prompt) {
@@ -666,13 +697,9 @@ async fn handle_images_generations(body: &[u8], headers: &[HeaderField]) -> Http
 }
 
 async fn handle_raven_diffusion_async_job(
-    headers: &[HeaderField],
+    actor_detail: playground_auth::ActorDetail,
     parsed: &ImageGenBody,
 ) -> HttpResponse {
-    let actor_detail = match playground_auth::resolve_actor_detail(headers) {
-        Ok(d) => d,
-        Err(resp) => return resp,
-    };
     let actor = actor_detail.principal;
     let daily_max = image_quota::daily_max_for(actor_detail.kind);
     if let Err(e) = moderation::check_prompt_policy(&parsed.prompt) {
@@ -682,11 +709,11 @@ async fn handle_raven_diffusion_async_job(
     if meter.is_some() {
         let m = meter.unwrap();
         if meter_client::begin_job(m, actor, "img-64-1").await.is_err() {
-            if let Err(resp) = acquire_raven_diffusion_slot(actor, daily_max).await {
+            if let Err(resp) = acquire_raven_diffusion_slot(&actor_detail, daily_max).await {
                 return resp;
             }
         }
-    } else if let Err(resp) = acquire_raven_diffusion_slot(actor, daily_max).await {
+    } else if let Err(resp) = acquire_raven_diffusion_slot(&actor_detail, daily_max).await {
         return resp;
     }
     let seed = parsed.seed.unwrap_or(4242);
@@ -737,7 +764,8 @@ async fn store_image_blob(bytes: Vec<u8>, provider: &str) -> HttpResponse {
     json_response(200, &body)
 }
 
-async fn handle_mcp(body: &[u8]) -> HttpResponse {
+/// MCP tool calls run as the HTTP caller: the same key, limits and model gates apply.
+async fn handle_mcp(body: &[u8], headers: &[HeaderField]) -> HttpResponse {
     let id = serde_json::from_slice::<serde_json::Value>(body)
         .ok()
         .and_then(|v| v.get("id").cloned())
@@ -773,7 +801,7 @@ async fn handle_mcp(body: &[u8]) -> HttpResponse {
                     });
                     let inner = handle_chat(
                         serde_json::to_vec(&payload).unwrap_or_default().as_slice(),
-                        &[],
+                        headers,
                     )
                     .await;
                     if inner.status_code != 200 {
@@ -798,7 +826,7 @@ async fn handle_mcp(body: &[u8]) -> HttpResponse {
                     });
                     let inner = handle_images_generations(
                         serde_json::to_vec(&payload).unwrap_or_default().as_slice(),
-                        &[],
+                        headers,
                     )
                     .await;
                     if inner.status_code != 200 {
@@ -820,16 +848,30 @@ async fn handle_chat(body: &[u8], headers: &[HeaderField]) -> HttpResponse {
         Ok(v) => v,
         Err(e) => return json_response(400, &format!(r#"{{"error":"{e}"}}"#)),
     };
-    if let Err(resp) = enforce_http_limits(headers).await {
-        return resp;
-    }
+    let actor_detail = match enforce_http_limits_detail(headers).await {
+        Ok(d) => d,
+        Err(resp) => return resp,
+    };
+    let max_prompt_chars = if actor_detail.kind.may_use_large_prompts() {
+        rate_limit::MAX_PROMPT_CHARS_MINTED
+    } else {
+        rate_limit::MAX_PROMPT_CHARS
+    };
     for m in &parsed.messages {
-        if let Err(e) = rate_limit::check_prompt_len(&m.content) {
+        if let Err(e) = rate_limit::check_prompt_len(&m.content, max_prompt_chars) {
             return json_response(400, &format!(r#"{{"error":"{e}"}}"#));
         }
     }
     if let Err(resp) = gate_model_or_response(&parsed.model) {
         return resp;
+    }
+    // Paid models run on the operator's provider accounts. Only an admin-minted key
+    // may use them; the public Playground key and unverified `ii:` tokens may not.
+    if models::is_paid(&parsed.model) && !actor_detail.kind.may_use_paid_models() {
+        return json_response(
+            402,
+            r#"{"error":"This model requires a TRP Router API key. The shared Playground key and Internet Identity sign-in cover free models only.","code":"api_key_required"}"#,
+        );
     }
     if models::anthropic_model_id(&parsed.model).is_some() {
         let keys = chat_keys_for_caller();
@@ -957,8 +999,14 @@ fn sse_chat_response(model: &str, content: &str, update_calls: u32, on_chain: bo
     }
 }
 
-fn handle_models() -> HttpResponse {
-    json_response(200, &model_availability::models_json_filtered(&runtime_flags()))
+fn handle_models(url: &str) -> HttpResponse {
+    let rt = runtime_flags();
+    let body = if url.contains("catalog=full") {
+        model_availability::models_json_full(&rt)
+    } else {
+        model_availability::models_json_filtered(&rt)
+    };
+    json_response(200, &body)
 }
 
 fn handle_status() -> HttpResponse {
@@ -1007,7 +1055,7 @@ async fn http_request_update(req: HttpRequest) -> HttpResponse {
                 )
             }
             "/v1/chat/completions" => return handle_chat(&req.body, &req.headers).await,
-            "/mcp" => return handle_mcp(&req.body).await,
+            "/mcp" => return handle_mcp(&req.body, &req.headers).await,
             _ => {}
         }
     }
@@ -1027,7 +1075,7 @@ fn http_request(req: HttpRequest) -> HttpResponse {
         return cors_preflight();
     }
     match path.as_str() {
-        "/v1/models" => handle_models(),
+        "/v1/models" => handle_models(&req.url),
         "/v1/status" => handle_status(),
         "/mcp" => json_response(200, &mcp::handle_get()),
         p if p.starts_with("/blob/") => {

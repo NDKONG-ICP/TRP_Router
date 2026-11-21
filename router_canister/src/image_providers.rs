@@ -63,12 +63,16 @@ pub async fn http_post_json(
 }
 
 /// Relay infer responses (chat JSON only).
+///
+/// The relay reports an upstream failure as HTTP 502 with a JSON body
+/// `{"ok":false,"error":"…"}`. Keep that body so the caller can surface the real
+/// reason (retired model, bad provider key, quota) instead of a bare "upstream 502".
 pub async fn http_post_json_relay(
     url: String,
     headers: Vec<HttpHeader>,
     body: Vec<u8>,
 ) -> Result<Vec<u8>, String> {
-    outcall_post_json(url, headers, body, 262_144).await
+    outcall_post_json_opts(url, headers, body, 262_144, true).await
 }
 
 async fn outcall_post_json(
@@ -76,6 +80,16 @@ async fn outcall_post_json(
     headers: Vec<HttpHeader>,
     body: Vec<u8>,
     max_response_bytes: u64,
+) -> Result<Vec<u8>, String> {
+    outcall_post_json_opts(url, headers, body, max_response_bytes, false).await
+}
+
+async fn outcall_post_json_opts(
+    url: String,
+    headers: Vec<HttpHeader>,
+    body: Vec<u8>,
+    max_response_bytes: u64,
+    keep_json_error_body: bool,
 ) -> Result<Vec<u8>, String> {
     let arg = CanisterHttpRequestArgument {
         url,
@@ -89,6 +103,9 @@ async fn outcall_post_json(
         .await
         .map_err(|(code, msg)| format!("http outcall {code:?} {msg}"))?;
     let status: u128 = resp.status.0.to_string().parse().unwrap_or(0);
+    if keep_json_error_body && status >= 400 && resp.body.first() == Some(&b'{') {
+        return Ok(resp.body);
+    }
     if status >= 500 {
         return Err(format!("upstream {status}"));
     }

@@ -2,6 +2,8 @@
 
 What `/v1/models` advertises matches what works over HTTP on **this** deployment. Disabled routes return **501** with `"code":"model_not_enabled"` (no vault env strings).
 
+Playground uses **`GET /v1/models?catalog=full`** to show the full smoke catalog with `"enabled": true|false` per row (off-chain chat stays `enabled: false` until relay is wired).
+
 ## Currently typical on mainnet (no relay)
 
 | Capability | Models | Requirement |
@@ -35,8 +37,10 @@ See [`relay/DEPLOY.md`](../relay/DEPLOY.md).
 export DFX_WARNING=-mainnet_plaintext_identity
 cd trp-router
 dfx deploy router_canister --network ic --identity ic_deploy_plain --yes
-node scripts/wire-raven-diffusion.mjs
+node scripts/enable-all-models.mjs
 ```
+
+`enable-all-models.mjs` runs `wire-raven-diffusion.mjs` (blob, llama, diffusion, playground key) plus `set-vault-from-env.mjs` (relay + provider keys from `.env`). Requires owner `.env` with `RELAY_URL`, `RELAY_SHARED_SECRET`, and API keys for providers you use.
 
 Verify: `GET …/v1/models`, on-chain chat, async image job flow.
 

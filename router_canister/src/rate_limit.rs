@@ -8,7 +8,10 @@ use std::cell::RefCell;
 
 const PER_MINUTE: u32 = 60;
 const PER_DAY: u32 = 2_000;
-const MAX_PROMPT_CHARS: usize = 8_000;
+pub const MAX_PROMPT_CHARS: usize = 8_000;
+/// Operator-minted integrator keys (ActorKind::ApiKeyMinted) get a higher cap so the
+/// operator's own agents can send large expert/system prompts the free tier can't.
+pub const MAX_PROMPT_CHARS_MINTED: usize = 32_000;
 
 #[derive(Clone, Default, serde::Serialize, serde::Deserialize)]
 struct Window {
@@ -42,10 +45,10 @@ fn day_bucket(now_ns: u64) -> u64 {
     now_ns / 86_400_000_000_000
 }
 
-pub fn check_prompt_len(prompt: &str) -> Result<(), String> {
-    if prompt.chars().count() > MAX_PROMPT_CHARS {
+pub fn check_prompt_len(prompt: &str, max_chars: usize) -> Result<(), String> {
+    if prompt.chars().count() > max_chars {
         return Err(format!(
-            "prompt exceeds {MAX_PROMPT_CHARS} characters"
+            "prompt exceeds {max_chars} characters"
         ));
     }
     Ok(())

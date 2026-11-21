@@ -83,12 +83,17 @@ pub fn insert_key(key: &str, label: String, created_ns: u64) {
 pub fn revoke_key(key: &str) -> bool {
     let h = KeyHash(hash_key(key));
     KEYS.with(|m| {
-        if let Some(mut r) = m.borrow().get(&h) {
-            r.active = false;
-            m.borrow_mut().insert(h, r);
-            true
-        } else {
-            false
+        // Read into a local first: an `if let` on `m.borrow().get(..)` keeps the read
+        // borrow alive for the whole block, so the `borrow_mut()` inside it panicked
+        // ("already borrowed") and every revoke trapped.
+        let existing = m.borrow().get(&h);
+        match existing {
+            Some(mut r) => {
+                r.active = false;
+                m.borrow_mut().insert(h, r);
+                true
+            }
+            None => false,
         }
     })
 }

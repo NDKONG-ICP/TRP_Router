@@ -59,8 +59,8 @@
         o.value = m.id;
         let suffix = "";
         if (m.on_chain) suffix = " · on-chain";
-        else if (m.byok) suffix = " · BYOK";
         else if (m.free_tier) suffix = " · free tier";
+        else suffix = " · API key";
         o.textContent = m.id + suffix;
         og.appendChild(o);
       });
@@ -79,8 +79,10 @@
     }
     const bits = [m.owned_by];
     if (m.on_chain) bits.push("runs in-canister");
-    if (m.byok) bits.push("requires your Anthropic API key on the router");
     if (m.free_tier) bits.push("free tier");
+    // Paid models are served only to minted TRP Router API keys, not to the
+    // Playground's shared key or Internet Identity sign-in.
+    else bits.push("needs a TRP Router API key — not available in the Playground");
     chatMeta.textContent = bits.join(" · ");
   }
 

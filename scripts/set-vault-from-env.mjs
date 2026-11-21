@@ -6,8 +6,18 @@ import { fileURLToPath } from "url";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const net = process.env.DFX_NETWORK || "ic";
+const identity = process.env.DFX_IDENTITY || "ic_deploy_plain";
 const dfx = (cmd) =>
-  execSync(`dfx ${cmd} --network ${net}`, { cwd: root, encoding: "utf8" }).trim();
+  execSync(`dfx ${cmd} --network ${net} --identity ${identity}`, {
+    cwd: root,
+    encoding: "utf8",
+    env: {
+      ...process.env,
+      NO_COLOR: "1",
+      TERM: "xterm-256color",
+      DFX_WARNING: "-mainnet_plaintext_identity",
+    },
+  }).trim();
 
 const envPath = join(root, ".env");
 if (!existsSync(envPath)) {

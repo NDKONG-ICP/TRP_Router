@@ -6,8 +6,9 @@
     const tags = [];
     if (m.on_chain) tags.push('<span class="badge on">on-chain</span>');
     else tags.push('<span class="badge off">off-chain</span>');
-    if (m.byok) tags.push('<span class="badge soon">BYOK</span>');
+    if (m.enabled === false) tags.push('<span class="badge soon">not enabled</span>');
     if (m.free_tier) tags.push('<span class="badge soon">free</span>');
+    else tags.push('<span class="badge soon">API key</span>');
     return (
       '<div class="model-row">' +
       '<code class="model-id">' +
@@ -24,7 +25,7 @@
   }
 
   async function load() {
-    const url = window.TRP?.modelsListUrl?.() || "";
+    const url = window.TRP?.modelsListUrl?.({ full: true }) || "";
     if (!url) {
       host.textContent = "Router URL not configured.";
       return;
@@ -44,7 +45,7 @@
         chat.map(row).join("") +
         "<h4 style='margin-top:20px'>Image models</h4>" +
         image.map(row).join("") +
-        "<p class='muted' style='margin-top:16px'>Use these ids in API calls. Anthropic models need BYOK on the router; Groq/OpenRouter routes need the relay configured.</p>";
+        "<p class='muted' style='margin-top:16px'>“Not enabled” models are on the roadmap but not wired on this deployment yet (relay for off-chain chat, blob_store for off-chain images). Callable ids match <code>GET /v1/models</code> without <code>?catalog=full</code>.</p>";
     } catch (e) {
       host.textContent = "Could not load models: " + (e.message || e);
     }

@@ -5,7 +5,9 @@
       const u = window.TRP.routerPostUrl();
       if (u) return u;
     }
-    return (cfg.routerPostUrl || "").replace(/\.icp0\.io\b/, ".raw.icp0.io");
+    const host = (cfg.routerPostUrl || "").replace(/\/v1\/?$/, "");
+    if (/\.raw\.icp0\.io\b/i.test(host)) return host + "/v1";
+    return host.replace(/\.icp0\.io\b/, ".raw.icp0.io") + "/v1";
   }
   const apiKey = cfg.apiKey || "";
   const diffusionId = cfg.diffusionCanisterId || "7chv3-5iaaa-aaaao-bbq3a-cai";
@@ -51,7 +53,13 @@
     const { IDL } = await import(
       "https://esm.sh/@dfinity/candid@" + AGENT_VER
     );
-    const agent = await HttpAgent.create({ host: "https://icp-api.io" });
+    // Signed-in users must call with their II identity. The router only treats an
+    // "ii:<principal>" token as that user (personal free tier + paid credits) when the
+    // call's authenticated caller matches it; an anonymous call is free-tier only.
+    const ii = window.TRP && window.TRP.getII ? window.TRP.getII() : null;
+    const agentOpts = { host: "https://icp-api.io" };
+    if (ii && ii.authIdentity) agentOpts.identity = ii.authIdentity;
+    const agent = await HttpAgent.create(agentOpts);
     const idlFactory = ({ IDL }) =>
       IDL.Service({
         playground_image_generate: IDL.Func(
